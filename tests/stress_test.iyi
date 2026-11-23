@@ -81,7 +81,7 @@ test "Stress: 1,000 chained Style.render calls preserve exact geometry and perfo
 
   last = ""
   1000.times do |i|
-    last = style.render("Frame #{i}\n" + Style.new_style.foreground(Theme.iyi.secondary).render("iyi-tui"))
+    last = style.render("Frame #{i}\n" + Style.new_style.foreground(Theme.iyi.secondary).render("itui"))
   end
   elapsed_ms = (Time.monotonic - t0).total_milliseconds
   assert_eq(last.split('\n').size, 6, "2 content + 2 pad + 2 border = 6 lines")

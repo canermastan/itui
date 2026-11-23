@@ -1,1 +1,1 @@
-module github.com/canermastan/iyi-tui
+module github.com/canermastan/itui

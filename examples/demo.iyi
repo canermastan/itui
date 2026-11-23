@@ -54,7 +54,7 @@ pub struct DemoApp
     body_h = win.body_height(reserved_rows: 16, min_rows: 7)
 
     logs = [
-      "[01] Welcome to the iyi-tui interactive playground!",
+      "[01] Welcome to the itui interactive playground!",
       "[02] Click any tab, table row, or panel with your mouse.",
       "[03] Use the mouse wheel or ↑/↓ to scroll this Viewport.",
       "[04] Press '+' / '-' to adjust the ProgressBar below.",
@@ -275,7 +275,7 @@ pub struct DemoApp
     total_inner_w = left_w + right_w + 4
     body_h = @window.body_height(reserved_rows: 16, min_rows: 7)
 
-    title = Style.new_style.bold.foreground(theme.secondary).render("♥ iyi-tui Interactive Playground")
+    title = Style.new_style.bold.foreground(theme.secondary).render("♥ itui Interactive Playground")
     clicks_badge = Style.new_style.foreground(theme.muted).render("Clicks: #{@clicks}")
     header_top = "#{title}   #{@spinner.render}   #{clicks_badge}"
 

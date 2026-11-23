@@ -1,6 +1,6 @@
-# `iyi-tui` — AI Agent & Engineering Guide (`AGENTS.md`)
+# `itui` — AI Agent & Engineering Guide (`AGENTS.md`)
 
-This guide provides AI agents and developers with the language rules, module API surface, architectural patterns, and build/test commands needed to work with or build applications using **`iyi-tui`** (a Bubble Tea & Lipgloss-inspired Terminal UI toolkit for the `iyi` programming language).
+This guide provides AI agents and developers with the language rules, module API surface, architectural patterns, and build/test commands needed to work with or build applications using **`itui`** (a Bubble Tea & Lipgloss-inspired Terminal UI toolkit for the `iyi` programming language).
 
 ---
 
@@ -27,7 +27,7 @@ This guide provides AI agents and developers with the language rules, module API
 
 ---
 
-## 2. `iyi-tui` Module Map & API Surface
+## 2. `itui` Module Map & API Surface
 
 All modules are reachable via a single `import src/tui::*` (or selectively with `import src/...::{...}`):
 
@@ -73,7 +73,7 @@ confirmed = TUI.confirm("Start build?")
 
 ### B. Layer 2: Elm Architecture (`Model` -> `update` -> `view`) Full-Screen Apps
 
-All `iyi-tui` components are **immutable `struct`s**. Every `handle_key(key)` or `with_*` call returns a new updated value:
+All `itui` components are **immutable `struct`s**. Every `handle_key(key)` or `with_*` call returns a new updated value:
 
 ```crystal
 module app/studio

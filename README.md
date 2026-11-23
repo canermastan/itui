@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/iyi-tui-banner.png" alt="iyi-tui banner">
+  <img src="assets/itui-banner.png" alt="itui banner">
   <p align="center">
     The fun, functional, and stateful way to build terminal apps in <a href="https://iyi.dev">iyi</a>.<br>
     A modular TUI framework for simple one-line prompts and rich full-screen terminal applications.
@@ -11,15 +11,15 @@
 </p>
 
 <p align="center">
-  <img src="assets/progress_bar.gif" width="720" alt="iyi-tui ProgressBar and Spinner">
+  <img src="assets/progress_bar.gif" width="720" alt="itui ProgressBar and Spinner">
 </p>
 
 <p align="center">
-  <img src="assets/viewport.gif" width="720" alt="iyi-tui Scrollable Viewport">
+  <img src="assets/viewport.gif" width="720" alt="itui Scrollable Viewport">
 </p>
 
 <p align="center">
-  <img src="assets/textfield.gif" width="720" alt="iyi-tui FilterList and TextArea">
+  <img src="assets/textfield.gif" width="720" alt="itui FilterList and TextArea">
 </p>
 
 ## Features
@@ -179,7 +179,7 @@ iyi test tests
 
 ## AI Agents (`AGENTS.md`)
 
-Using an AI coding agent with `iyi-tui`? Point it to **[`AGENTS.md`](AGENTS.md)** for the full exported API map, component recipes, and `iyi` module rules.
+Using an AI coding agent with `itui`? Point it to **[`AGENTS.md`](AGENTS.md)** for the full exported API map, component recipes, and `iyi` module rules.
 
 ## License
 
