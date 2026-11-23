@@ -29,7 +29,7 @@ This guide provides AI agents and developers with the language rules, module API
 
 ## 2. `itui` Module Map & API Surface
 
-All modules are reachable via a single `import src/tui::*` (or selectively with `import src/...::{...}`):
+All modules are reachable via a single `import itui/src/tui::*` (after `iyi get github.com/canermastan/itui --as itui`) or selectively with `import itui/src/...::{...}`:
 
 | Module Path | Exported Types (`pub`) | Responsibility (SRP) |
 |---|---|---|
@@ -63,7 +63,7 @@ All modules are reachable via a single `import src/tui::*` (or selectively with 
 ```crystal
 module app/cli
 
-import src/tui::{TUI}
+import itui/src/tui::{TUI}
 
 name      = TUI.input("Project name:", "iyi-app")
 target    = TUI.select("Target arch:", ["x86_64-linux", "aarch64-darwin", "wasm32-wasi"])
@@ -78,7 +78,7 @@ All `itui` components are **immutable `struct`s**. Every `handle_key(key)` or `w
 ```crystal
 module app/studio
 
-import src/tui::*
+import itui/src/tui::*
 
 pub struct AppModel
   getter viewport : Viewport

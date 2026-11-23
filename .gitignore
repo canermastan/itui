@@ -1,6 +1,3 @@
-# Local iyi compiler source checkout (do not publish with package)
-iyi/
-
 # Compiled binaries and artifacts
 *.exe
 *.out

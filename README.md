@@ -31,6 +31,22 @@
 - **Mouse support** — SGR mouse clicks (`is_click?`, `is_right_click?`), wheel scrolling (`is_wheel_up?`, `is_wheel_down?`), and hit-testing (`mouse.in_rect?`).
 - **Cross-platform** — Runs on macOS, Linux, and Windows terminals with zero external C dependencies.
 
+## Installation
+
+`itui` is an `iyi` module. Add it to your project under the short name `itui`, which the examples below use:
+
+```sh
+iyi get github.com/canermastan/itui --as itui
+```
+
+That writes one line to `iyi.mod`:
+
+```text
+require github.com/canermastan/itui v0.1.0 as itui
+```
+
+and `itui/src/tui` then names `itui`'s entry module. Run `iyi get -u` to update to the latest release.
+
 ## Quick Start
 
 ### One-Liner Interactive Prompts
@@ -40,7 +56,7 @@ Need quick user input without writing a model or event loop? Import `TUI` and ca
 ```crystal
 module app/cli
 
-import src/tui::{TUI}
+import itui/src/tui::{TUI}
 
 name     = TUI.input("Project name:", "my-app")
 choice   = TUI.select("Pick a component:", ["ProgressBar", "Viewport", "FilterList", "TextArea"])
@@ -52,12 +68,12 @@ proceed  = TUI.confirm("Start build?")
 
 Full-screen apps follow an immutable **`Model` → `update` → `view`** loop.
 
-First, declare your module and import `src/tui::*` (or pick individual types with `import src/tui::{Style, ProgressBar, KeyEvent}`):
+First, declare your module and import `itui/src/tui::*` (or pick individual types with `import itui/src/tui::{Style, ProgressBar, KeyEvent}`):
 
 ```crystal
 module app/main
 
-import src/tui::*
+import itui/src/tui::*
 ```
 
 Define your application state (`Model`) as an immutable `struct`:
