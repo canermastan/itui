@@ -1,0 +1,170 @@
+module src/style/color
+
+pub enum ColorKind : Int32
+  None      = 0
+  Ansi16    = 1
+  Ansi256   = 2
+  TrueColor = 3
+end
+
+pub struct Color
+  getter kind : ColorKind
+  getter code : UInt8
+  getter r : UInt8
+  getter g : UInt8
+  getter b : UInt8
+
+  def initialize(@kind : ColorKind, @code : UInt8 = 0_u8, @r : UInt8 = 0_u8, @g : UInt8 = 0_u8, @b : UInt8 = 0_u8)
+  end
+
+  def self.none : Color
+    Color.new(ColorKind::None)
+  end
+
+  def self.ansi(code : UInt8) : Color
+    Color.new(ColorKind::Ansi16, code: code)
+  end
+
+  def self.ansi256(index : UInt8) : Color
+    Color.new(ColorKind::Ansi256, code: index)
+  end
+
+  def self.ansi256(index : Int32) : Color
+    clamped = index < 0 ? 0 : (index > 255 ? 255 : index)
+    Color.new(ColorKind::Ansi256, code: clamped.to_u8)
+  end
+
+  def self.rgb(r : UInt8, g : UInt8, b : UInt8) : Color
+    Color.new(ColorKind::TrueColor, r: r, g: g, b: b)
+  end
+
+  def self.rgb(r : Int32, g : Int32, b : Int32) : Color
+    Color.new(
+      ColorKind::TrueColor,
+      r: clamp_u8(r),
+      g: clamp_u8(g),
+      b: clamp_u8(b)
+    )
+  end
+
+  def self.hex(hex_str : String) : Color
+    cleaned = hex_str.starts_with?('#') ? hex_str.lchop('#') : hex_str
+    return none unless cleaned.bytesize == 6
+    r_val = parse_hex_pair(cleaned[0, 2])
+    g_val = parse_hex_pair(cleaned[2, 2])
+    b_val = parse_hex_pair(cleaned[4, 2])
+    rgb(r_val, g_val, b_val)
+  end
+
+  def self.black : Color
+    ansi(30_u8)
+  end
+
+  def self.red : Color
+    ansi(31_u8)
+  end
+
+  def self.green : Color
+    ansi(32_u8)
+  end
+
+  def self.yellow : Color
+    ansi(33_u8)
+  end
+
+  def self.blue : Color
+    ansi(34_u8)
+  end
+
+  def self.magenta : Color
+    ansi(35_u8)
+  end
+
+  def self.cyan : Color
+    ansi(36_u8)
+  end
+
+  def self.white : Color
+    ansi(97_u8)
+  end
+
+  def self.gray : Color
+    ansi(90_u8)
+  end
+
+  def self.bright_red : Color
+    ansi(91_u8)
+  end
+
+  def self.bright_green : Color
+    ansi(92_u8)
+  end
+
+  def self.bright_yellow : Color
+    ansi(93_u8)
+  end
+
+  def self.bright_blue : Color
+    ansi(94_u8)
+  end
+
+  def self.bright_magenta : Color
+    ansi(95_u8)
+  end
+
+  def self.bright_cyan : Color
+    ansi(96_u8)
+  end
+
+  def none? : Bool
+    @kind == ColorKind::None
+  end
+
+  def fg_sgr : String
+    case @kind
+    in ColorKind::None
+      ""
+    in ColorKind::Ansi16
+      @code.to_s
+    in ColorKind::Ansi256
+      "38;5;#{@code}"
+    in ColorKind::TrueColor
+      "38;2;#{@r};#{@g};#{@b}"
+    end
+  end
+
+  def bg_sgr : String
+    case @kind
+    in ColorKind::None
+      ""
+    in ColorKind::Ansi16
+      (@code + 10_u8).to_s
+    in ColorKind::Ansi256
+      "48;5;#{@code}"
+    in ColorKind::TrueColor
+      "48;2;#{@r};#{@g};#{@b}"
+    end
+  end
+
+  private def self.clamp_u8(val : Int32) : UInt8
+    val < 0 ? 0_u8 : (val > 255 ? 255_u8 : val.to_u8)
+  end
+
+  private def self.parse_hex_pair(pair : String) : UInt8
+    high = hex_digit(pair.byte_at(0))
+    low = hex_digit(pair.byte_at(1))
+    ((high << 4) | low).to_u8
+  end
+
+  private def self.hex_digit(byte : UInt8) : Int32
+    if byte >= 48_u8 && byte <= 57_u8
+      (byte - 48_u8).to_i32
+    elsif byte >= 65_u8 && byte <= 70_u8
+      (byte - 55_u8).to_i32
+    elsif byte >= 97_u8 && byte <= 102_u8
+      (byte - 87_u8).to_i32
+    else
+      0
+    end
+  end
+end

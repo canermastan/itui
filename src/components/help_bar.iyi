@@ -1,0 +1,52 @@
+module src/components/help_bar
+
+import src/core/key::{KeyBinding}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct HelpBar
+  getter bindings : Array(KeyBinding)
+  getter separator : String
+  getter key_style : Style
+  getter desc_style : Style
+  getter sep_style : Style
+
+  def initialize(
+    @bindings : Array(KeyBinding) = [] of KeyBinding,
+    @separator : String = " • ",
+    @key_style : Style = Style.new_style.bold.foreground(Theme.iyi.secondary),
+    @desc_style : Style = Style.new_style.foreground(Theme.iyi.muted),
+    @sep_style : Style = Style.new_style.dim.foreground(Theme.iyi.primary)
+  )
+  end
+
+  def with_bindings(new_bindings : Array(KeyBinding)) : HelpBar
+    HelpBar.new(new_bindings, @separator, @key_style, @desc_style, @sep_style)
+  end
+
+  def with_separator(sep : String) : HelpBar
+    HelpBar.new(@bindings, sep, @key_style, @desc_style, @sep_style)
+  end
+
+  def with_styles(key_s : Style, desc_s : Style, sep_s : Style = @sep_style) : HelpBar
+    HelpBar.new(@bindings, @separator, key_s, desc_s, sep_s)
+  end
+
+  def render(width : Int32 = 0) : String
+    active = @bindings.select { |b| b.enabled }
+    return "" if active.empty?
+
+    sep_rendered = @sep_style.render(@separator)
+    items = active.map do |b|
+      @key_style.render(b.key_label) + " " + @desc_style.render(b.description)
+    end
+    line = items.join(sep_rendered)
+
+    if width > 0
+      Style.new_style.width(width).align(:center).render(line)
+    else
+      line
+    end
+  end
+end

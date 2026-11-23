@@ -1,0 +1,209 @@
+module src/components/table
+
+import src/core/key::{KeyEvent}
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct TableColumn
+  getter title : String
+  getter width : Int32
+  getter align : Symbol
+
+  def initialize(@title : String, width : Int32 = 12, @align : Symbol = :left)
+    @width = width < 1 ? 1 : width
+  end
+end
+
+pub struct Table
+  getter columns : Array(TableColumn)
+  getter rows : Array(Array(String))
+  getter cursor : Int32
+  getter header_style : Style
+  getter selected_style : Style
+  getter row_style : Style
+  getter separator : String
+
+  def initialize(
+    @columns : Array(TableColumn),
+    @rows : Array(Array(String)) = [] of Array(String),
+    cursor : Int32 = 0,
+    @header_style : Style = Style.new_style.bold.foreground(Theme.iyi.secondary),
+    @selected_style : Style = Style.new_style.bold.foreground(Theme.iyi.text).background(Theme.iyi.primary),
+    @row_style : Style = Style.new_style.foreground(Theme.iyi.text),
+    @separator : String = " │ "
+  )
+    max_idx = @rows.empty? ? 0 : @rows.size - 1
+    @cursor = cursor < 0 ? 0 : (cursor > max_idx ? max_idx : cursor)
+  end
+
+  def move_up : Table
+    return self if @rows.empty?
+    next_c = @cursor > 0 ? @cursor - 1 : 0
+    with_cursor(next_c)
+  end
+
+  def move_down : Table
+    return self if @rows.empty?
+    max_idx = @rows.size - 1
+    next_c = @cursor < max_idx ? @cursor + 1 : max_idx
+    with_cursor(next_c)
+  end
+
+  def move_top : Table
+    with_cursor(0)
+  end
+
+  def move_bottom : Table
+    return self if @rows.empty?
+    with_cursor(@rows.size - 1)
+  end
+
+  def with_cursor(new_cursor : Int32) : Table
+    Table.new(
+      @columns,
+      @rows,
+      new_cursor,
+      @header_style,
+      @selected_style,
+      @row_style,
+      @separator
+    )
+  end
+
+  def with_rows(new_rows : Array(Array(String))) : Table
+    Table.new(
+      @columns,
+      new_rows,
+      @cursor,
+      @header_style,
+      @selected_style,
+      @row_style,
+      @separator
+    )
+  end
+
+  def with_styles(header_s : Style, selected_s : Style, row_s : Style = @row_style) : Table
+    Table.new(
+      @columns,
+      @rows,
+      @cursor,
+      header_s,
+      selected_s,
+      row_s,
+      @separator
+    )
+  end
+
+  def selected_row : Array(String)
+    return [] of String if @rows.empty?
+    @rows[@cursor]
+  end
+
+  def handle_key(key : KeyEvent) : Table
+    if key.is_up? || key.is_wheel_up?
+      move_up
+    elsif key.is_down? || key.is_wheel_down?
+      move_down
+    elsif key.is_home?
+      move_top
+    elsif key.is_end?
+      move_bottom
+    else
+      self
+    end
+  end
+
+  def render(focused : Bool = true, max_visible_rows : Int32 = 0, target_width : Int32 = 0) : String
+    return "" if @columns.empty?
+
+    effective_cols = compute_effective_columns(target_width)
+    sep_width = Ansi.visible_width(@separator)
+    total_w = effective_cols.reduce(0) { |acc, c| acc + c.width } + (effective_cols.size - 1) * sep_width + 2
+
+    lines = [] of String
+
+    header_cells = effective_cols.map do |col|
+      Ansi.pad_visible(Ansi.truncate_visible(col.title, col.width), col.width, col.align)
+    end
+    header_line = "  " + header_cells.join(@separator)
+    lines << @header_style.render(header_line)
+
+    divider_color = focused ? Theme.iyi.primary : Theme.iyi.border_inactive
+    lines << Style.new_style.foreground(divider_color).render("─" * total_w)
+
+    start_idx, end_idx = visible_range(max_visible_rows)
+    idx = start_idx
+    while idx < end_idx
+      row = @rows[idx]
+      is_selected = idx == @cursor
+      pointer = is_selected ? (focused ? "▸ " : "• ") : "  "
+      cells = Array(String).new(effective_cols.size)
+      col_i = 0
+      while col_i < effective_cols.size
+        col = effective_cols[col_i]
+        raw_val = col_i < row.size ? row[col_i] : ""
+        trimmed = Ansi.truncate_visible(raw_val, col.width)
+        cells << Ansi.pad_visible(trimmed, col.width, col.align)
+        col_i = col_i + 1
+      end
+      row_text = pointer + cells.join(@separator)
+      if is_selected
+        if focused
+          lines << @selected_style.render(row_text)
+        else
+          unfocused_sel = Style.new_style.bold.foreground(Theme.iyi.secondary).background(Theme.iyi.surface_alt)
+          lines << unfocused_sel.render(row_text)
+        end
+      else
+        lines << @row_style.render(row_text)
+      end
+      idx = idx + 1
+    end
+
+    if max_visible_rows > 0
+      rendered_rows = end_idx - start_idx
+      remaining = max_visible_rows - rendered_rows
+      remaining.times { lines << (" " * total_w) }
+    end
+
+    lines.join("\n")
+  end
+
+  # Expands the last column so the table fills `target_width` inside responsive layouts.
+  private def compute_effective_columns(target_width : Int32) : Array(TableColumn)
+    return @columns if target_width <= 0 || @columns.empty?
+    sep_width = Ansi.visible_width(@separator)
+    fixed_without_last = 2 + (@columns.size - 1) * sep_width
+    idx = 0
+    while idx < @columns.size - 1
+      fixed_without_last = fixed_without_last + @columns[idx].width
+      idx = idx + 1
+    end
+    last_col = @columns[@columns.size - 1]
+    remaining = target_width - fixed_without_last
+    new_last_w = remaining > last_col.width ? remaining : last_col.width
+
+    result = Array(TableColumn).new(@columns.size)
+    i = 0
+    while i < @columns.size - 1
+      result << @columns[i]
+      i = i + 1
+    end
+    result << TableColumn.new(last_col.title, new_last_w, last_col.align)
+    result
+  end
+
+  private def visible_range(max_rows : Int32) : {Int32, Int32}
+    total = @rows.size
+    return {0, total} if max_rows <= 0 || total <= max_rows
+    half = max_rows // 2
+    start_i = @cursor - half
+    start_i = 0 if start_i < 0
+    if start_i + max_rows > total
+      start_i = total - max_rows
+    end
+    {start_i, start_i + max_rows}
+  end
+end

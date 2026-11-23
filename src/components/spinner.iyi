@@ -1,0 +1,59 @@
+module src/components/spinner
+
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct Spinner
+  getter frames : Array(String)
+  getter index : Int32
+  getter color : Color
+  getter label : String
+
+  def initialize(
+    @frames : Array(String) = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+    index : Int32 = 0,
+    @color : Color = Theme.iyi.secondary,
+    @label : String = ""
+  )
+    count = @frames.size
+    @index = count == 0 ? 0 : ((index % count) + count) % count
+  end
+
+  def self.dots(label : String = "", color : Color = Theme.iyi.secondary) : Spinner
+    Spinner.new(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 0, color, label)
+  end
+
+  def self.line(label : String = "", color : Color = Theme.iyi.secondary) : Spinner
+    Spinner.new(["|", "/", "-", "\\"], 0, color, label)
+  end
+
+  def self.pulse(label : String = "", color : Color = Theme.iyi.primary) : Spinner
+    Spinner.new(["♥", "♡", "♥", "★"], 0, color, label)
+  end
+
+  def tick : Spinner
+    return self if @frames.empty?
+    Spinner.new(@frames, (@index + 1) % @frames.size, @color, @label)
+  end
+
+  def with_label(new_label : String) : Spinner
+    Spinner.new(@frames, @index, @color, new_label)
+  end
+
+  def with_color(new_color : Color) : Spinner
+    Spinner.new(@frames, @index, new_color, @label)
+  end
+
+  def current_frame : String
+    return "" if @frames.empty?
+    @frames[@index]
+  end
+
+  def render : String
+    glyph = Style.new_style.bold.foreground(@color).render(current_frame)
+    return glyph if @label.empty?
+    label_styled = Style.new_style.bold.foreground(Theme.iyi.text).render(@label)
+    glyph + " " + label_styled
+  end
+end

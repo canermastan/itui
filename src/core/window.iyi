@@ -1,0 +1,55 @@
+module src/core/window
+
+import src/core/terminal::{Terminal}
+
+pub struct WindowSize
+  getter cols : Int32
+  getter rows : Int32
+
+  def initialize(cols : Int32 = 80, rows : Int32 = 24)
+    @cols = cols < 20 ? 20 : cols
+    @rows = rows < 8 ? 8 : rows
+  end
+
+  def self.detect(default_cols : Int32 = 100, default_rows : Int32 = 28) : WindowSize
+    r, c = Terminal.size(default_rows, default_cols)
+    WindowSize.new(cols: c, rows: r)
+  end
+
+  def ==(other : WindowSize) : Bool
+    @cols == other.cols && @rows == other.rows
+  end
+
+  def scale_width(percent : Int32, min_w : Int32 = 10, max_w : Int32 = 1000) : Int32
+    raw = (@cols * percent) // 100
+    clamped_min = raw < min_w ? min_w : raw
+    clamped_min > max_w ? max_w : clamped_min
+  end
+
+  def scale_height(percent : Int32, min_h : Int32 = 4, max_h : Int32 = 500) : Int32
+    raw = (@rows * percent) // 100
+    clamped_min = raw < min_h ? min_h : raw
+    clamped_min > max_h ? max_h : clamped_min
+  end
+
+  def split_horizontal(left_percent : Int32, reserved : Int32 = 12, min_left : Int32 = 20, min_right : Int32 = 20) : {Int32, Int32}
+    usable = @cols - reserved
+    min_total = min_left + min_right
+    usable = min_total if usable < min_total
+
+    left_w = (usable * left_percent) // 100
+    left_w = min_left if left_w < min_left
+    right_w = usable - left_w
+    if right_w < min_right
+      right_w = min_right
+      left_w = usable - right_w
+      left_w = min_left if left_w < min_left
+    end
+    {left_w, right_w}
+  end
+
+  def body_height(reserved_rows : Int32 = 12, min_rows : Int32 = 6) : Int32
+    avail = @rows - reserved_rows
+    avail < min_rows ? min_rows : avail
+  end
+end

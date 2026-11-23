@@ -1,0 +1,200 @@
+module src/components/filter_list
+
+import src/core/key::{KeyEvent, KeyKind}
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct FilterList
+  getter items : Array(String)
+  getter query : String
+  getter cursor : Int32
+  getter prompt_label : String
+  getter highlight_color : Color
+  getter active_color : Color
+  getter text_color : Color
+
+  def initialize(
+    @items : Array(String),
+    @query : String = "",
+    cursor : Int32 = 0,
+    @prompt_label : String = "Ara:",
+    @highlight_color : Color = Theme.iyi.secondary,
+    @active_color : Color = Theme.iyi.primary,
+    @text_color : Color = Theme.iyi.text
+  )
+    matches = filtered_items
+    max_idx = matches.empty? ? 0 : matches.size - 1
+    @cursor = cursor < 0 ? 0 : (cursor > max_idx ? max_idx : cursor)
+  end
+
+  def with_query(new_query : String) : FilterList
+    FilterList.new(
+      @items,
+      new_query,
+      0,
+      @prompt_label,
+      @highlight_color,
+      @active_color,
+      @text_color
+    )
+  end
+
+  def with_cursor(new_cursor : Int32) : FilterList
+    FilterList.new(
+      @items,
+      @query,
+      new_cursor,
+      @prompt_label,
+      @highlight_color,
+      @active_color,
+      @text_color
+    )
+  end
+
+  def with_colors(highlight_c : Color, active_c : Color = @active_color, text_c : Color = @text_color) : FilterList
+    FilterList.new(
+      @items,
+      @query,
+      @cursor,
+      @prompt_label,
+      highlight_c,
+      active_c,
+      text_c
+    )
+  end
+
+  def filtered_items : Array(String)
+    return @items if @query.empty?
+    needle = @query.downcase
+    @items.select { |item| item.downcase.includes?(needle) }
+  end
+
+  def filtered_indices : Array(Int32)
+    result = [] of Int32
+    needle = @query.downcase
+    idx = 0
+    while idx < @items.size
+      if @query.empty? || @items[idx].downcase.includes?(needle)
+        result << idx
+      end
+      idx = idx + 1
+    end
+    result
+  end
+
+  def selected_item : String
+    matches = filtered_items
+    return "" if matches.empty?
+    matches[@cursor]
+  end
+
+  def selected_original_index : Int32
+    indices = filtered_indices
+    return -1 if indices.empty?
+    indices[@cursor]
+  end
+
+  # Matches `KeyKind::Up` / `KeyKind::Down` specifically instead of `is_up?` / `is_down?`
+  # so letter keys `'j'` and `'k'` are typed into the search query rather than moving the cursor.
+  def handle_key(key : KeyEvent) : FilterList
+    matches = filtered_items
+    if key.kind == KeyKind::Up
+      return self if matches.empty?
+      next_c = @cursor > 0 ? (@cursor - 1) : (matches.size - 1)
+      with_cursor(next_c)
+    elsif key.kind == KeyKind::Down
+      return self if matches.empty?
+      next_c = (@cursor + 1) % matches.size
+      with_cursor(next_c)
+    elsif key.is_home?
+      with_cursor(0)
+    elsif key.is_end?
+      return self if matches.empty?
+      with_cursor(matches.size - 1)
+    elsif key.is_backspace? || key.is_delete?
+      with_query(Ansi.drop_last_char(@query))
+    elsif key.kind == KeyKind::Char || key.kind == KeyKind::Space
+      with_query(@query + key.text)
+    else
+      self
+    end
+  end
+
+  def render(max_visible : Int32 = 8, pad_height : Bool = true) : String
+    icon = Style.new_style.bold.foreground(@active_color).render("♥")
+    label = Style.new_style.bold.foreground(@text_color).render(@prompt_label)
+    q_text = Style.new_style.bold.foreground(@highlight_color).render(@query)
+    cursor_block = Style.new_style.foreground(@active_color).render("█")
+    matches = filtered_items
+    count_badge = Style.new_style.dim.foreground(Theme.iyi.muted).render(" (#{matches.size}/#{@items.size})")
+
+    lines = ["#{icon} #{label} #{q_text}#{cursor_block}#{count_badge}"]
+
+    if matches.empty?
+      lines << Style.new_style.italic.foreground(Theme.iyi.muted).render("  (eşleşen öğe bulunamadı)")
+      if pad_height && max_visible > 1
+        (max_visible - 1).times { lines << "" }
+      end
+      return lines.join("\n")
+    end
+
+    limit = max_visible <= 0 ? matches.size : max_visible
+    start_i, end_i = visible_window(matches.size, limit)
+    idx = start_i
+    while idx < end_i
+      item = matches[idx]
+      is_sel = idx == @cursor
+      pointer = is_sel ? Style.new_style.bold.foreground(@active_color).render("  ▸ ") : "    "
+      highlighted = highlight_match(item, @query, is_sel)
+      lines << (pointer + highlighted)
+      idx = idx + 1
+    end
+
+    if pad_height && max_visible > 0
+      rendered = end_i - start_i
+      (max_visible - rendered).times { lines << "" }
+    end
+
+    lines.join("\n")
+  end
+
+  def highlight_match(item : String, needle : String, is_selected : Bool) : String
+    base_style = is_selected ? Style.new_style.bold.foreground(@text_color) : Style.new_style.foreground(Theme.iyi.muted)
+    return base_style.render(item) if needle.empty?
+
+    lower_item = item.downcase
+    lower_needle = needle.downcase
+    match_at = lower_item.byte_index(lower_needle)
+    return base_style.render(item) unless match_at.is_a?(Int32)
+
+    match_len = lower_needle.bytesize
+    if match_at + match_len > item.bytesize
+      return base_style.render(item)
+    end
+
+    before = match_at > 0 ? item[0, match_at] : ""
+    matched = item[match_at, match_len]
+    after_start = match_at + match_len
+    after = after_start < item.bytesize ? item[after_start, item.bytesize - after_start] : ""
+
+    hl_style = Style.new_style.bold.underline.foreground(@highlight_color)
+    part_before = before.empty? ? "" : base_style.render(before)
+    part_match  = hl_style.render(matched)
+    part_after  = after.empty? ? "" : base_style.render(after)
+
+    part_before + part_match + part_after
+  end
+
+  private def visible_window(total : Int32, max_rows : Int32) : {Int32, Int32}
+    return {0, total} if max_rows <= 0 || total <= max_rows
+    half = max_rows // 2
+    start_i = @cursor - half
+    start_i = 0 if start_i < 0
+    if start_i + max_rows > total
+      start_i = total - max_rows
+    end
+    {start_i, start_i + max_rows}
+  end
+end

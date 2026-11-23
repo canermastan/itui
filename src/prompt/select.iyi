@@ -1,0 +1,122 @@
+module src/prompt/select
+
+import src/core/key::{KeyEvent, KeyBinding}
+import src/core/terminal::{Terminal}
+import src/components/help_bar::{HelpBar}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct SelectPrompt
+  getter title : String
+  getter options : Array(String)
+  getter cursor : Int32
+  getter done : Bool
+  getter active_color : Color
+  getter text_color : Color
+
+  def initialize(
+    @title : String,
+    @options : Array(String),
+    cursor : Int32 = 0,
+    @done : Bool = false,
+    @active_color : Color = Theme.iyi.secondary,
+    @text_color : Color = Theme.iyi.text
+  )
+    max_idx = @options.empty? ? 0 : @options.size - 1
+    @cursor = cursor < 0 ? 0 : (cursor > max_idx ? max_idx : cursor)
+  end
+
+  def with_colors(active_c : Color, text_c : Color = @text_color) : SelectPrompt
+    SelectPrompt.new(@title, @options, @cursor, @done, active_c, text_c)
+  end
+
+  def selected : String
+    return "" if @options.empty?
+    @options[@cursor]
+  end
+
+  def handle_key(key : KeyEvent) : SelectPrompt
+    return self if @options.empty?
+    if key.is_up?
+      next_c = @cursor > 0 ? (@cursor - 1) : (@options.size - 1)
+      SelectPrompt.new(@title, @options, next_c, false, @active_color, @text_color)
+    elsif key.is_down?
+      next_c = (@cursor + 1) % @options.size
+      SelectPrompt.new(@title, @options, next_c, false, @active_color, @text_color)
+    elsif key.is_enter? || key.is_quit?
+      SelectPrompt.new(@title, @options, @cursor, true, @active_color, @text_color)
+    else
+      self
+    end
+  end
+
+  def render : String
+    q_mark = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str = Style.new_style.bold.foreground(@text_color).render(@title)
+    header = q_mark + " " + title_str
+
+    active_style = Style.new_style.bold.foreground(@active_color)
+    pointer_style = Style.new_style.bold.foreground(Theme.iyi.primary)
+    normal_style = Style.new_style.foreground(Theme.iyi.muted)
+
+    lines = [header]
+    idx = 0
+    while idx < @options.size
+      opt = @options[idx]
+      if idx == @cursor
+        lines << ("  " + pointer_style.render("▸ ") + active_style.render(opt))
+      else
+        lines << normal_style.render("    " + opt)
+      end
+      idx = idx + 1
+    end
+
+    help = HelpBar.new([
+      KeyBinding.on_any(["up", "down"], "↑/↓", "gezin"),
+      KeyBinding.on("enter", "enter", "seç")
+    ])
+    lines << "  " + help.render
+    lines.join("\n")
+  end
+
+  def self.ask(title : String, options : Array(String)) : String
+    return "" if options.empty?
+    state = SelectPrompt.new(title, options)
+    tty = Terminal.tty?
+
+    result = Terminal.with_raw_mode(hide_cursor_on_enter: true) do
+      printed_lines = 0
+      while !state.done
+        if tty
+          if printed_lines > 0
+            Terminal.cursor_up(printed_lines)
+          end
+          view = state.render
+          view_lines = view.split('\n')
+          view_lines.each do |line|
+            STDOUT.write("\e[2K\r" + line + "\r\n")
+          end
+          printed_lines = view_lines.size
+        end
+
+        key = KeyEvent.read
+        break if key.none?
+        state = state.handle_key(key)
+      end
+
+      if tty && printed_lines > 0
+        Terminal.cursor_up(printed_lines)
+        printed_lines.times { STDOUT.write("\e[2K\r\n") }
+        Terminal.cursor_up(printed_lines)
+      end
+      state.selected
+    end
+
+    check_icon = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str  = Style.new_style.bold.foreground(Theme.iyi.text).render(title)
+    ans_str    = Style.new_style.bold.foreground(Theme.iyi.secondary).render(result)
+    puts "#{check_icon} #{title_str} #{ans_str}"
+    result
+  end
+end

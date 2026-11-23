@@ -1,0 +1,88 @@
+module src/core/focus
+
+import src/core/key::{KeyEvent}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct FocusManager
+  getter panels : Array(String)
+  getter active_index : Int32
+  getter active_border_color : Color
+  getter inactive_border_color : Color
+
+  def initialize(
+    @panels : Array(String),
+    active_index : Int32 = 0,
+    @active_border_color : Color = Theme.iyi.primary,
+    @inactive_border_color : Color = Theme.iyi.border_inactive
+  )
+    count = @panels.size
+    @active_index = count == 0 ? 0 : ((active_index % count) + count) % count
+  end
+
+  def current : String
+    return "" if @panels.empty?
+    @panels[@active_index]
+  end
+
+  def focused?(panel_id : String) : Bool
+    current == panel_id
+  end
+
+  def next_focus : FocusManager
+    return self if @panels.empty?
+    FocusManager.new(
+      @panels,
+      (@active_index + 1) % @panels.size,
+      @active_border_color,
+      @inactive_border_color
+    )
+  end
+
+  def prev_focus : FocusManager
+    return self if @panels.empty?
+    count = @panels.size
+    FocusManager.new(
+      @panels,
+      (@active_index - 1 + count) % count,
+      @active_border_color,
+      @inactive_border_color
+    )
+  end
+
+  def focus(panel_id : String) : FocusManager
+    idx = @panels.index(panel_id)
+    return self unless idx.is_a?(Int32)
+    FocusManager.new(@panels, idx, @active_border_color, @inactive_border_color)
+  end
+
+  def handle_key(key : KeyEvent) : {FocusManager, Bool}
+    if key.is_tab?
+      {next_focus, true}
+    elsif key.is_shift_tab?
+      {prev_focus, true}
+    else
+      {self, false}
+    end
+  end
+
+  def border_color_for(panel_id : String) : Color
+    focused?(panel_id) ? @active_border_color : @inactive_border_color
+  end
+
+  def apply_panel_style(panel_id : String, base_style : Style) : Style
+    base_style.border_foreground(border_color_for(panel_id))
+  end
+
+  def format_title(panel_id : String, title : String) : String
+    if focused?(panel_id)
+      dot = Style.new_style.bold.foreground(Theme.iyi.secondary).render("● ")
+      label = Style.new_style.bold.foreground(@active_border_color).render(title)
+      tag = Style.new_style.bold.foreground(Theme.iyi.secondary).render(" [ACTIVE]")
+      dot + label + tag
+    else
+      Style.new_style.dim.foreground(Theme.iyi.muted).render("○ " + title)
+    end
+  end
+end

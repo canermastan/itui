@@ -1,0 +1,178 @@
+module src/components/modal
+
+import src/core/key::{KeyEvent}
+import src/style/ansi::{Ansi}
+import src/style/border::{Border}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct Modal
+  getter title : String
+  getter message : String
+  getter confirm_label : String
+  getter cancel_label : String
+  getter confirm_selected : Bool
+  getter visible : Bool
+  getter width : Int32
+  getter border_color : Color
+  getter accent_color : Color
+
+  def initialize(
+    @title : String,
+    @message : String,
+    @confirm_label : String = "Onayla",
+    @cancel_label : String = "İptal",
+    @confirm_selected : Bool = true,
+    @visible : Bool = true,
+    width : Int32 = 46,
+    @border_color : Color = Theme.iyi.primary,
+    @accent_color : Color = Theme.iyi.secondary
+  )
+    @width = width < 22 ? 22 : width
+  end
+
+  def show : Modal
+    with_state(@confirm_selected, true)
+  end
+
+  def hide : Modal
+    with_state(@confirm_selected, false)
+  end
+
+  def toggle_button : Modal
+    with_state(!@confirm_selected, @visible)
+  end
+
+  def with_colors(border_c : Color, accent_c : Color = @accent_color) : Modal
+    Modal.new(
+      @title,
+      @message,
+      @confirm_label,
+      @cancel_label,
+      @confirm_selected,
+      @visible,
+      @width,
+      border_c,
+      accent_c
+    )
+  end
+
+  def handle_key(key : KeyEvent) : Modal
+    return self unless @visible
+    if key.is_left? || key.is_right? || key.is_tab? || key.is_shift_tab?
+      toggle_button
+    elsif key.is_escape?
+      with_state(false, false)
+    elsif key.is_enter?
+      with_state(@confirm_selected, false)
+    else
+      self
+    end
+  end
+
+  def render : String
+    return "" unless @visible
+
+    header = Style.new_style.bold.foreground(@accent_color).render("♥ " + @title + " ♥")
+    body = Style.new_style.foreground(Theme.iyi.text).render(wrap_message(@message, @width))
+
+    active_confirm = Style.new_style.bold.foreground(Theme.iyi.surface).background(@accent_color).render("  ✓ #{@confirm_label}  ")
+    idle_confirm   = Style.new_style.foreground(Theme.iyi.muted).render("  ✓ #{@confirm_label}  ")
+
+    active_cancel  = Style.new_style.bold.foreground(Theme.iyi.text).background(@border_color).render("  ✗ #{@cancel_label}  ")
+    idle_cancel    = Style.new_style.foreground(Theme.iyi.muted).render("  ✗ #{@cancel_label}  ")
+
+    btn_confirm = @confirm_selected ? active_confirm : idle_confirm
+    btn_cancel  = !@confirm_selected ? active_cancel : idle_cancel
+    buttons_line = @cancel_label.empty? ? btn_confirm : (btn_confirm + "   " + btn_cancel)
+
+    inner = [
+      header,
+      "",
+      body,
+      "",
+      buttons_line
+    ].join("\n")
+
+    Style.new_style
+      .border(Border.double)
+      .border_foreground(@border_color)
+      .background(Theme.iyi.surface)
+      .padding(1, 3)
+      .width(@width)
+      .align(:center)
+      .render(inner)
+  end
+
+  def render_over(background_view : String) : String
+    return background_view unless @visible
+    bg_lines = background_view.empty? ? [""] : background_view.split('\n')
+    modal_lines = render.split('\n')
+
+    bg_h = bg_lines.size
+    bg_w = bg_lines.reduce(0) do |max_w, line|
+      w = Ansi.visible_width(line)
+      w > max_w ? w : max_w
+    end
+    modal_h = modal_lines.size
+    modal_w = modal_lines.reduce(0) do |max_w, line|
+      w = Ansi.visible_width(line)
+      w > max_w ? w : max_w
+    end
+
+    target_h = bg_h > modal_h ? bg_h : modal_h
+    target_w = bg_w > modal_w ? bg_w : modal_w
+
+    top_row = (target_h - modal_h) // 2
+    left_pad = (target_w - modal_w) // 2
+    left_pad = 0 if left_pad < 0
+
+    output = Array(String).new(target_h)
+    r = 0
+    while r < target_h
+      if r >= top_row && r < top_row + modal_h
+        m_line = modal_lines[r - top_row]
+        output << ((" " * left_pad) + m_line)
+      else
+        bg_line = r < bg_lines.size ? bg_lines[r] : ""
+        output << bg_line
+      end
+      r = r + 1
+    end
+    output.join("\n")
+  end
+
+  private def wrap_message(text : String, max_w : Int32) : String
+    return text if text.size <= max_w || max_w <= 10
+    words = text.split(' ')
+    lines = [] of String
+    current = ""
+    words.each do |w|
+      if current.empty?
+        current = w
+      elsif current.size + 1 + w.size <= max_w
+        current = current + " " + w
+      else
+        lines << current
+        current = w
+      end
+    end
+    lines << current unless current.empty?
+    lines.join("\n")
+  end
+
+  private def with_state(selected : Bool, vis : Bool) : Modal
+    Modal.new(
+      @title,
+      @message,
+      @confirm_label,
+      @cancel_label,
+      selected,
+      vis,
+      @width,
+      @border_color,
+      @accent_color
+    )
+  end
+end

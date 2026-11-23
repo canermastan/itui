@@ -1,0 +1,168 @@
+module tests/display_components_test
+
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+import src/core/key::{KeyEvent, KeyBinding}
+import src/components/table::{Table, TableColumn}
+import src/components/viewport::{Viewport}
+import src/components/progress_bar::{ProgressBar}
+import src/components/spinner::{Spinner}
+import src/components/help_bar::{HelpBar}
+
+def assert_eq(actual, expected, msg : String) : Nil
+  raise "Assertion failed: #{msg} (expected: #{expected.inspect}, got: #{actual.inspect})" unless actual == expected
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "Assertion failed: #{msg}" unless cond
+end
+
+test "Table clamps cursor on init, handles empty rows/columns, and preserves immutability" do
+  assert_eq(Table.new([] of TableColumn).render, "", "0 columns renders empty")
+
+  cols = [TableColumn.new("SVC", 8), TableColumn.new("CPU", 5, :right)]
+  empty = Table.new(cols, [] of Array(String), 5)
+  assert_eq(empty.cursor, 0, "empty table cursor clamps to 0")
+  assert_true(empty.selected_row.empty?, "empty table selected_row is empty")
+
+  rows = [["A", "10%"], ["B", "20%"], ["C", "30%"]]
+  t0 = Table.new(cols, rows, 99)
+  assert_eq(t0.cursor, 2, "cursor > size-1 clamps to last row")
+
+  t1 = t0.move_up
+  assert_eq(t0.cursor, 2, "original table remains immutable")
+  assert_eq(t1.cursor, 1, "moved table points to row 1")
+  assert_eq(t1.selected_row[0], "B", "selected_row matches cursor")
+end
+
+test "Table truncates overflowing cell text with ellipsis and pads missing row cells" do
+  cols = [TableColumn.new("NAME", 6), TableColumn.new("NOTE", 8)]
+  rows = [["VeryLongServiceName"], ["Short", "1234567890"]]
+  tbl = Table.new(cols, rows, 0)
+  plain = Ansi.strip(tbl.render(focused: true))
+  lines = plain.split('\n')
+
+  assert_eq(lines.size, 4, "header + divider + 2 rows")
+  assert_true(lines[2].includes?("VeryL…"), "long cell truncated to 5 chars + ellipsis")
+  assert_true(lines[3].includes?("1234567…"), "second cell truncated cleanly")
+  assert_eq(lines[0].size, lines[2].size, "header and data row must have identical visible width")
+  assert_eq(lines[2].size, lines[3].size, "all data rows must have identical visible width")
+end
+
+test "Table windowing (max_visible_rows) keeps cursor visible and pads short lists" do
+  cols = [TableColumn.new("ID", 4)]
+  rows = (1..10).map { |i| ["R#{i}"] }
+  tbl = Table.new(cols, rows, 8)
+
+  rendered = Ansi.strip(tbl.render(focused: true, max_visible_rows: 3))
+  lines = rendered.split('\n')
+  assert_eq(lines.size, 5, "windowed table must render exact max_visible_rows")
+  assert_true(rendered.includes?("▸ R9"), "selected row R9 must be inside visible window")
+
+  short_tbl = Table.new(cols, [["R1"]], 0)
+  short_lines = Ansi.strip(short_tbl.render(focused: true, max_visible_rows: 4)).split('\n')
+  assert_eq(short_lines.size, 6, "short table padded to header + divider + 4 rows")
+end
+
+test "Table supports Home/End/Up/Down/j/k navigation and with_rows cursor clamping" do
+  cols = [TableColumn.new("K", 4)]
+  tbl = Table.new(cols, [["1"], ["2"], ["3"], ["4"]], 0)
+  tbl = tbl.handle_key(KeyEvent.parse("\e[F"))
+  assert_eq(tbl.cursor, 3, "End jumps to last row")
+  tbl = tbl.handle_key(KeyEvent.parse("\e[H"))
+  assert_eq(tbl.cursor, 0, "Home jumps to first row")
+
+  shrunk = tbl.with_cursor(3).with_rows([["only"]])
+  assert_eq(shrunk.cursor, 0, "cursor clamps when rows shrink")
+  assert_eq(shrunk.selected_row[0], "only", "selected_row valid after shrink")
+end
+
+test "Viewport scrolls accurately with Up/Down/PageUp/PageDown/Home/End and reports scroll_percent" do
+  lines = (1..21).map { |i| "Log line #{i}" }
+  vp = Viewport.new(lines, offset: 0, width: 30, height: 5)
+  assert_eq(vp.max_offset, 16, "21 lines - 5 height = 16 max_offset")
+  assert_eq(vp.scroll_percent, 0, "at top -> 0%")
+
+  vp = vp.handle_key(KeyEvent.parse("\e[6~"))
+  assert_eq(vp.offset, 4, "PageDown advances by height - 1")
+  assert_eq(vp.scroll_percent, 25, "4 / 16 = 25%")
+
+  vp = vp.handle_key(KeyEvent.parse("\e[F"))
+  assert_eq(vp.offset, 16, "End jumps to max_offset")
+  assert_eq(vp.scroll_percent, 100, "at bottom -> 100%")
+
+  vp = vp.handle_key(KeyEvent.parse("\e[5~"))
+  assert_eq(vp.offset, 12, "PageUp retreats by height - 1")
+
+  vp = vp.handle_key(KeyEvent.parse("\e[H"))
+  assert_eq(vp.offset, 0, "Home returns to 0")
+end
+
+test "Viewport append_line respects follow_bottom and renders exact width/height with scrollbar" do
+  vp = Viewport.new(["A", "B", "C"], offset: 0, width: 20, height: 3, show_scrollbar: true)
+  vp_follow = vp.append_line("D", follow_bottom: true)
+  assert_eq(vp_follow.offset, 1, "follow_bottom=true scrolls to show new line D")
+
+  vp_stay = vp.append_line("D", follow_bottom: false)
+  assert_eq(vp_stay.offset, 0, "follow_bottom=false preserves offset")
+
+  out_lines = vp_follow.render(focused: true).split('\n')
+  assert_eq(out_lines.size, 3, "rendered height matches viewport height")
+  out_lines.each_with_index do |line, i|
+    assert_eq(Ansi.visible_width(line), 20, "viewport row #{i} width must equal 20")
+  end
+end
+
+test "Viewport resizes cleanly when with_size grows beyond remaining offset" do
+  vp = Viewport.new(["1", "2", "3", "4", "5", "6"], offset: 4, width: 20, height: 2)
+  assert_eq(vp.offset, 4, "initial offset 4 valid for height 2")
+  grown = vp.with_size(40, 5)
+  assert_eq(grown.max_offset, 1, "max_offset shrinks to 1 when height grows to 5")
+  assert_eq(grown.offset, 1, "offset must clamp to new max_offset")
+end
+
+test "ProgressBar calculates filled/empty glyph counts accurately for 0%, 50%, 100% and custom glyphs" do
+  p0 = ProgressBar.new(0, 10).with_glyphs("#", "-")
+  assert_true(Ansi.strip(p0.render).includes?("----------   0%"), "0% bar")
+
+  p50 = p0.with_percent(50).with_label("BUILD")
+  assert_true(Ansi.strip(p50.render) == "BUILD #####-----  50%", "50% bar with label")
+
+  p100 = p0.with_percent(100)
+  assert_true(Ansi.strip(p100.render).includes?("########## 100%"), "100% bar")
+
+  default_out = ProgressBar.new(60, 10).render
+  assert_true(default_out.includes?("38;2;225;29;72"), "uses Theme.iyi.primary for fill")
+  assert_true(default_out.includes?("38;2;250;204;21"), "uses Theme.iyi.secondary for percentage")
+end
+
+test "Spinner wraps around frames infinitely and handles empty frames safely" do
+  sp = Spinner.line("Loading")
+  assert_eq(sp.current_frame, "|", "frame 0")
+  assert_eq(sp.tick.current_frame, "/", "frame 1")
+  assert_eq(sp.tick.tick.current_frame, "-", "frame 2")
+  assert_eq(sp.tick.tick.tick.current_frame, "\\", "frame 3")
+  assert_eq(sp.tick.tick.tick.tick.current_frame, "|", "frame 4 wraps back to 0")
+
+  assert_eq(Ansi.strip(sp.render), "| Loading", "renders frame + label")
+  assert_eq(Spinner.new([] of String).tick.current_frame, "", "empty frames safe")
+end
+
+test "HelpBar filters out disabled bindings and centers when width is given" do
+  b1 = KeyBinding.on("tab", "Tab", "panel")
+  b2 = KeyBinding.new(["x"], "x", "gizli", enabled: false)
+  b3 = KeyBinding.on("q", "q", "çıkış")
+
+  hb = HelpBar.new([b1, b2, b3])
+  plain = Ansi.strip(hb.render)
+  assert_true(plain.includes?("Tab panel"), "enabled binding 1 shown")
+  assert_true(!plain.includes?("gizli"), "disabled binding omitted")
+  assert_true(plain.includes?("q çıkış"), "enabled binding 3 shown")
+
+  centered = hb.render(40)
+  assert_eq(Ansi.visible_width(centered), 40, "HelpBar with width pads to exact target width")
+
+  assert_eq(HelpBar.new([b2]).render, "", "HelpBar with only disabled bindings renders empty")
+end

@@ -1,0 +1,120 @@
+module src/core/mouse
+
+pub enum MouseButton : Int32
+  None      = 0
+  Left      = 1
+  Middle    = 2
+  Right     = 3
+  WheelUp   = 4
+  WheelDown = 5
+end
+
+pub enum MouseAction : Int32
+  None    = 0
+  Press   = 1
+  Release = 2
+  Scroll  = 3
+end
+
+pub struct MouseEvent
+  getter button : MouseButton
+  getter action : MouseAction
+  getter x : Int32
+  getter y : Int32
+
+  def initialize(
+    @button : MouseButton = MouseButton::None,
+    @action : MouseAction = MouseAction::None,
+    @x : Int32 = 0,
+    @y : Int32 = 0,
+  )
+  end
+
+  def self.none : MouseEvent
+    MouseEvent.new
+  end
+
+  def none? : Bool
+    @action == MouseAction::None
+  end
+
+  def is_click? : Bool
+    @button == MouseButton::Left && @action == MouseAction::Press
+  end
+
+  def is_right_click? : Bool
+    @button == MouseButton::Right && @action == MouseAction::Press
+  end
+
+  def is_release? : Bool
+    @action == MouseAction::Release
+  end
+
+  def is_wheel_up? : Bool
+    @button == MouseButton::WheelUp && @action == MouseAction::Scroll
+  end
+
+  def is_wheel_down? : Bool
+    @button == MouseButton::WheelDown && @action == MouseAction::Scroll
+  end
+
+  def in_rect?(left : Int32, top : Int32, width : Int32, height : Int32) : Bool
+    return false if width <= 0 || height <= 0
+    @x >= left && @x < left + width && @y >= top && @y < top + height
+  end
+
+  def self.parse_sgr(raw : String, offset : Int32 = 0) : {MouseEvent, Int32}
+    len = raw.bytesize
+    return {none, 0} if offset + 6 > len
+    return {none, 0} unless raw.byte_at(offset) == 27_u8 && raw.byte_at(offset + 1) == 91_u8 && raw.byte_at(offset + 2) == 60_u8
+
+    pos = offset + 3
+    b_val, pos = read_uint(raw, pos)
+    return {none, 0} if b_val < 0 || pos >= len || raw.byte_at(pos) != 59_u8
+    pos = pos + 1
+
+    x_val, pos = read_uint(raw, pos)
+    return {none, 0} if x_val < 0 || pos >= len || raw.byte_at(pos) != 59_u8
+    pos = pos + 1
+
+    y_val, pos = read_uint(raw, pos)
+    return {none, 0} if y_val < 0 || pos >= len
+
+    term_byte = raw.byte_at(pos)
+    return {none, 0} unless term_byte == 77_u8 || term_byte == 109_u8 # 'M' or 'm'
+    consumed = (pos + 1) - offset
+
+    is_release = term_byte == 109_u8
+    base_code = b_val & 0xC3 # Mask modifier bits (Shift/Alt/Ctrl)
+
+    if base_code == 64
+      return {MouseEvent.new(MouseButton::WheelUp, MouseAction::Scroll, x_val, y_val), consumed}
+    elsif base_code == 65
+      return {MouseEvent.new(MouseButton::WheelDown, MouseAction::Scroll, x_val, y_val), consumed}
+    end
+
+    btn = case b_val & 3
+          when 0 then MouseButton::Left
+          when 1 then MouseButton::Middle
+          when 2 then MouseButton::Right
+          else        MouseButton::None
+          end
+
+    act = is_release ? MouseAction::Release : MouseAction::Press
+    {MouseEvent.new(btn, act, x_val, y_val), consumed}
+  end
+
+  private def self.read_uint(raw : String, start : Int32) : {Int32, Int32}
+    len = raw.bytesize
+    pos = start
+    val = 0
+    while pos < len
+      b = raw.byte_at(pos)
+      break unless b >= 48_u8 && b <= 57_u8
+      val = val * 10 + (b - 48_u8).to_i32
+      pos = pos + 1
+    end
+    return {-1, start} if pos == start
+    {val, pos}
+  end
+end

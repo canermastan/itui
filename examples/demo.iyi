@@ -1,0 +1,389 @@
+module examples/demo
+
+import src/tui::*
+
+pub struct DemoApp
+  getter tabs : Tabs
+  getter table : Table
+  getter viewport : Viewport
+  getter filter_list : FilterList
+  getter text_area : TextArea
+  getter progress : ProgressBar
+  getter spinner : Spinner
+  getter modal : Modal
+  getter focus : FocusManager
+  getter window : WindowSize
+  getter last_event : String
+  getter clicks : Int32
+  getter quit : Bool
+
+  def initialize(
+    @tabs : Tabs,
+    @table : Table,
+    @viewport : Viewport,
+    @filter_list : FilterList,
+    @text_area : TextArea,
+    @progress : ProgressBar,
+    @spinner : Spinner,
+    @modal : Modal,
+    @focus : FocusManager,
+    @window : WindowSize,
+    @last_event : String = "Ready — click anywhere or press keys!",
+    @clicks : Int32 = 0,
+    @quit : Bool = false
+  )
+  end
+
+  def self.initial(win : WindowSize = WindowSize.detect(96, 26)) : DemoApp
+    tabs = Tabs.new(["Playground", "FilterList", "TextArea"], 0)
+    cols = [
+      TableColumn.new("COMPONENT", 13, :left),
+      TableColumn.new("STATUS", 9, :left),
+      TableColumn.new("SCORE", 6, :right)
+    ]
+    rows = [
+      ["ProgressBar", "Active", "92%"],
+      ["Viewport",    "Active", "88%"],
+      ["FilterList",  "Ready",  "95%"],
+      ["TextArea",    "Active", "90%"],
+      ["Modal",       "Standby","85%"]
+    ]
+    tbl = Table.new(cols, rows, 0)
+
+    left_w, right_w = win.split_horizontal(44, reserved: 12, min_left: 34, min_right: 38)
+    body_h = win.body_height(reserved_rows: 16, min_rows: 7)
+
+    logs = [
+      "[01] Welcome to the iyi-tui interactive playground!",
+      "[02] Click any tab, table row, or panel with your mouse.",
+      "[03] Use the mouse wheel or ↑/↓ to scroll this Viewport.",
+      "[04] Press '+' / '-' to adjust the ProgressBar below.",
+      "[05] Press '1' / '2' / '3' to switch tabs (FilterList & TextArea).",
+      "[06] Press 'm' to open a centered Modal confirmation dialog.",
+      "[07] Press 'Tab' to switch focus between left & right panels.",
+      "[08] Press 'q' or 'Esc' at any time to exit cleanly."
+    ]
+    vp = Viewport.new(logs, 0, right_w, body_h)
+
+    fl = FilterList.new(
+      ["ProgressBar", "Viewport", "FilterList", "TextArea", "Table", "Tabs", "Modal", "Spinner", "HelpBar"],
+      "",
+      0,
+      "Search:"
+    )
+
+    ta = TextArea.from_text(
+      "module app/main\nimport src/tui::*\n\n# Type here! Press Enter for new lines.",
+      right_w,
+      body_h
+    )
+
+    pbar = ProgressBar.new(65, 28).with_label("Progress:")
+    sp = Spinner.pulse("LIVE", Theme.iyi.primary)
+
+    modal = Modal.new(
+      "Reset Playground",
+      "Reset progress bar to 50% and clear click counter?",
+      "Yes, Reset",
+      "Cancel",
+      confirm_selected: true,
+      visible: false,
+      width: 50
+    )
+
+    foc = FocusManager.new(["left", "right"], 0)
+    DemoApp.new(tabs, tbl, vp, fl, ta, pbar, sp, modal, foc, win)
+  end
+
+  def update(key : KeyEvent, win : WindowSize) : DemoApp
+    sp = @spinner.tick
+
+    if @modal.visible
+      confirmed = @modal.confirm_selected
+      next_modal = @modal.handle_key(key)
+      if !next_modal.visible && key.is_enter? && confirmed
+        next_vp = @viewport.append_line("[RESET] Counter cleared and progress reset to 50%", follow_bottom: true)
+        return copy_with(
+          viewport: next_vp,
+          progress: @progress.with_percent(50),
+          spinner: sp,
+          modal: next_modal,
+          window: win,
+          last_event: "Modal confirmed -> reset done!",
+          clicks: 0
+        )
+      end
+      return copy_with(spinner: sp, modal: next_modal, window: win, last_event: "Modal: #{key.text}")
+    end
+
+    if key.is_ctrl_c? || key.is_escape?
+      return copy_with(quit: true)
+    end
+
+    if key.is_mouse?
+      return handle_mouse(key, sp, win)
+    end
+
+    # Quit with 'q' only when not typing into FilterList (tab 1) or TextArea (tab 2)
+    if @tabs.active_index == 0 && (key.text == "q" || key.text == "Q")
+      return copy_with(quit: true)
+    end
+
+    next_focus, focus_changed = @focus.handle_key(key)
+    if focus_changed
+      return copy_with(
+        focus: next_focus,
+        spinner: sp,
+        window: win,
+        last_event: "Focus -> #{next_focus.current} panel"
+      )
+    end
+
+    if @tabs.active_index == 0
+      if key.matches?("1") || key.matches?("2") || key.matches?("3")
+        next_tabs = @tabs.handle_key(key)
+        return copy_with(tabs: next_tabs, spinner: sp, window: win, last_event: "Tab -> #{next_tabs.active_title}")
+      elsif key.matches?("+") || key.matches?("=")
+        np = @progress.with_percent(@progress.percent + 10)
+        return copy_with(progress: np, spinner: sp, window: win, last_event: "Progress -> #{np.percent}%")
+      elsif key.matches?("-") || key.matches?("_")
+        np = @progress.with_percent(@progress.percent - 10)
+        return copy_with(progress: np, spinner: sp, window: win, last_event: "Progress -> #{np.percent}%")
+      elsif key.matches?("m")
+        return copy_with(modal: @modal.show, spinner: sp, window: win, last_event: "Opened Modal dialog")
+      end
+    end
+
+    if @tabs.active_index == 1
+      next_fl = @filter_list.handle_key(key)
+      return copy_with(
+        filter_list: next_fl,
+        spinner: sp,
+        window: win,
+        last_event: "FilterList query: '#{next_fl.query}' (#{next_fl.filtered_items.size} matches)"
+      )
+    elsif @tabs.active_index == 2
+      next_ta = @text_area.handle_key(key)
+      return copy_with(
+        text_area: next_ta,
+        spinner: sp,
+        window: win,
+        last_event: "TextArea cursor: (#{next_ta.cursor_row + 1}, #{next_ta.cursor_col + 1})"
+      )
+    end
+
+    if @focus.focused?("left")
+      next_tbl = @table.handle_key(key)
+      sel = next_tbl.selected_row.empty? ? "" : next_tbl.selected_row[0]
+      next_vp = @viewport
+      if next_tbl.cursor != @table.cursor
+        next_vp = @viewport.append_line("[SELECT] Table row -> #{sel}", follow_bottom: true)
+      end
+      copy_with(table: next_tbl, viewport: next_vp, spinner: sp, window: win, last_event: "Selected: #{sel}")
+    else
+      next_vp = @viewport.handle_key(key)
+      copy_with(viewport: next_vp, spinner: sp, window: win, last_event: "Viewport scroll: #{next_vp.scroll_percent}%")
+    end
+  end
+
+  private def handle_mouse(key : KeyEvent, sp : Spinner, win : WindowSize) : DemoApp
+    m = key.mouse
+    left_w, _ = win.split_horizontal(44, reserved: 12, min_left: 34, min_right: 38)
+    split_x = left_w + 5
+
+    if key.is_wheel_up? || key.is_wheel_down?
+      if m.x < split_x && @tabs.active_index == 0
+        next_tbl = @table.handle_key(key)
+        return copy_with(table: next_tbl, spinner: sp, window: win, last_event: "Mouse wheel on Table (row #{next_tbl.cursor + 1})")
+      else
+        next_vp = @viewport.handle_key(key)
+        return copy_with(viewport: next_vp, spinner: sp, window: win, last_event: "Mouse wheel on Viewport (#{next_vp.scroll_percent}%)")
+      end
+    end
+
+    return copy_with(spinner: sp, window: win, last_event: "Mouse #{m.button}/#{m.action} at (#{m.x}, #{m.y})") unless key.is_click?
+
+    next_clicks = @clicks + 1
+    body_h = win.body_height(reserved_rows: 16, min_rows: 7)
+
+    # Row 3: Tabs bar inside the header box
+    if m.y == 3
+      tab_idx = m.x < 40 ? 0 : (m.x < 57 ? 1 : 2)
+      next_tabs = @tabs.with_index(tab_idx)
+      next_vp = @viewport.append_line("[CLICK ##{next_clicks}] Switched tab -> #{next_tabs.active_title}", follow_bottom: true)
+      return copy_with(
+        tabs: next_tabs,
+        viewport: next_vp,
+        spinner: sp,
+        window: win,
+        last_event: "Clicked tab '#{next_tabs.active_title}' at (#{m.x}, #{m.y})",
+        clicks: next_clicks
+      )
+    end
+
+    # Progress bar box below main panels
+    bar_top = body_h + 7
+    if m.y >= bar_top && m.y <= bar_top + 2
+      next_pct = (@progress.percent + 15) > 100 ? 15 : (@progress.percent + 15)
+      np = @progress.with_percent(next_pct)
+      next_vp = @viewport.append_line("[CLICK ##{next_clicks}] ProgressBar bumped -> #{np.percent}%", follow_bottom: true)
+      return copy_with(
+        progress: np,
+        viewport: next_vp,
+        spinner: sp,
+        window: win,
+        last_event: "Clicked ProgressBar -> #{np.percent}%",
+        clicks: next_clicks
+      )
+    end
+
+    # Main panels area: focus left or right panel and select Table row if clicked on left
+    if m.x < split_x
+      next_focus = @focus.focus("left")
+      next_tbl = @table
+      if @tabs.active_index == 0 && m.y >= 8 && m.y < 8 + @table.rows.size
+        next_tbl = @table.with_cursor(m.y - 8)
+      end
+      sel = next_tbl.selected_row.empty? ? "left" : next_tbl.selected_row[0]
+      next_vp = @viewport.append_line("[CLICK ##{next_clicks}] Left panel (#{sel}) at (#{m.x}, #{m.y})", follow_bottom: true)
+      copy_with(
+        table: next_tbl,
+        viewport: next_vp,
+        focus: next_focus,
+        spinner: sp,
+        window: win,
+        last_event: "Clicked Left panel (#{sel}) at (#{m.x}, #{m.y})",
+        clicks: next_clicks
+      )
+    else
+      next_focus = @focus.focus("right")
+      next_vp = @viewport.append_line("[CLICK ##{next_clicks}] Right panel at (#{m.x}, #{m.y})", follow_bottom: true)
+      copy_with(
+        viewport: next_vp,
+        focus: next_focus,
+        spinner: sp,
+        window: win,
+        last_event: "Clicked Right panel at (#{m.x}, #{m.y})",
+        clicks: next_clicks
+      )
+    end
+  end
+
+  def view : String
+    theme = Theme.iyi
+    left_w, right_w = @window.split_horizontal(44, reserved: 12, min_left: 34, min_right: 38)
+    total_inner_w = left_w + right_w + 4
+    body_h = @window.body_height(reserved_rows: 16, min_rows: 7)
+
+    title = Style.new_style.bold.foreground(theme.secondary).render("♥ iyi-tui Interactive Playground")
+    clicks_badge = Style.new_style.foreground(theme.muted).render("Clicks: #{@clicks}")
+    header_top = "#{title}   #{@spinner.render}   #{clicks_badge}"
+
+    header_box = Style.new_style
+      .border(:double)
+      .border_foreground(theme.primary)
+      .background(theme.surface)
+      .padding(0, 2)
+      .width(total_inner_w)
+      .align(:center)
+      .render(header_top + "\n" + @tabs.render)
+
+    left_content = ""
+    if @tabs.active_index == 1
+      left_title = @focus.format_title("left", "FILTERLIST (TYPE TO SEARCH)")
+      left_content = left_title + "\n" + @filter_list.render(max_visible: body_h - 2)
+    else
+      left_title = @focus.format_title("left", "COMPONENTS TABLE")
+      left_content = left_title + "\n" + @table.render(focused: @focus.focused?("left"), max_visible_rows: body_h - 2, target_width: left_w)
+    end
+    left_box = @focus.apply_panel_style("left", Style.new_style.border(:rounded).padding(0, 1).width(left_w)).render(left_content)
+
+    right_content = ""
+    if @tabs.active_index == 2
+      right_title = @focus.format_title("right", "TEXTAREA (TYPE & ENTER)")
+      right_content = right_title + "\n" + @text_area.render(focused: true)
+    else
+      pct_badge = Style.new_style.bold.foreground(theme.secondary).render(" [#{@viewport.scroll_percent}%]")
+      right_title = @focus.format_title("right", "EVENT VIEWPORT") + pct_badge
+      right_content = right_title + "\n" + @viewport.with_size(right_w, body_h).render(focused: @focus.focused?("right"))
+    end
+    right_box = @focus.apply_panel_style("right", Style.new_style.border(:rounded).padding(0, 1).width(right_w)).render(right_content)
+
+    main_row = Style.join_horizontal([left_box, right_box], gap: 2)
+
+    status_text = Style.new_style.foreground(theme.muted).render("Last: #{@last_event}")
+    bar_row = @progress.render + "   " + status_text
+    bar_box = Style.new_style
+      .border(:single)
+      .border_foreground(theme.border_inactive)
+      .padding(0, 2)
+      .width(total_inner_w)
+      .render(bar_row)
+
+    help = HelpBar.new([
+      KeyBinding.on("mouse", "Click/Wheel", "interact"),
+      KeyBinding.on("tab", "Tab", "focus"),
+      KeyBinding.on_any(["1", "2", "3"], "1/2/3", "tabs"),
+      KeyBinding.on_any(["+", "-"], "+/-", "progress"),
+      KeyBinding.on("m", "m", "modal"),
+      KeyBinding.on("q", "q/Esc", "quit")
+    ]).render(total_inner_w + 4)
+
+    base = Style.join_vertical([header_box, main_row, bar_box, help])
+    @modal.visible ? @modal.render_over(base) : base
+  end
+
+  private def copy_with(
+    tabs : Tabs = @tabs,
+    table : Table = @table,
+    viewport : Viewport = @viewport,
+    filter_list : FilterList = @filter_list,
+    text_area : TextArea = @text_area,
+    progress : ProgressBar = @progress,
+    spinner : Spinner = @spinner,
+    modal : Modal = @modal,
+    focus : FocusManager = @focus,
+    window : WindowSize = @window,
+    last_event : String = @last_event,
+    clicks : Int32 = @clicks,
+    quit : Bool = @quit
+  ) : DemoApp
+    DemoApp.new(
+      tabs, table, viewport, filter_list, text_area, progress, spinner,
+      modal, focus, window, last_event, clicks, quit
+    )
+  end
+end
+
+def run_demo : Nil
+  tty = Terminal.tty?
+  app = DemoApp.initial(WindowSize.detect(96, 26))
+
+  if tty
+    Terminal.enter_alt_screen
+    defer Terminal.exit_alt_screen
+
+    Terminal.with_raw_mode(hide_cursor_on_enter: true, mouse: true) do
+      while !app.quit
+        Terminal.cursor_home
+        app.view.split('\n').each do |line|
+          STDOUT.write(line + "\e[K\r\n")
+        end
+        STDOUT.write("\e[J")
+
+        key = KeyEvent.read
+        break if key.none?
+        app = app.update(key, WindowSize.detect(96, 26))
+      end
+    end
+  else
+    piped = STDIN.read_all.chomp('\n')
+    KeyEvent.parse_all(piped).each do |ev|
+      break if app.quit
+      app = app.update(ev, app.window)
+    end
+    puts app.view
+  end
+end
+
+run_demo

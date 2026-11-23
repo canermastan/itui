@@ -1,0 +1,291 @@
+module src/style/style
+
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/border::{Border}
+
+pub struct Edges
+  getter top : Int32
+  getter right : Int32
+  getter bottom : Int32
+  getter left : Int32
+
+  def initialize(@top : Int32 = 0, @right : Int32 = 0, @bottom : Int32 = 0, @left : Int32 = 0)
+  end
+
+  def self.zero : Edges
+    Edges.new(0, 0, 0, 0)
+  end
+
+  def self.all(val : Int32) : Edges
+    v = val < 0 ? 0 : val
+    Edges.new(v, v, v, v)
+  end
+
+  def self.symmetric(vertical : Int32, horizontal : Int32) : Edges
+    v = vertical < 0 ? 0 : vertical
+    h = horizontal < 0 ? 0 : horizontal
+    Edges.new(v, h, v, h)
+  end
+
+  def horizontal : Int32
+    @left + @right
+  end
+
+  def vertical : Int32
+    @top + @bottom
+  end
+end
+
+pub struct Style
+  getter fg : Color
+  getter bg : Color
+  getter border_fg : Color
+  getter border_bg : Color
+  getter border_style : Border
+  getter pad : Edges
+  getter mar : Edges
+  getter min_width : Int32
+  getter align_mode : Symbol
+  getter is_bold : Bool
+  getter is_italic : Bool
+  getter is_underline : Bool
+  getter is_dim : Bool
+
+  def initialize(
+    @fg : Color = Color.none,
+    @bg : Color = Color.none,
+    @border_fg : Color = Color.none,
+    @border_bg : Color = Color.none,
+    @border_style : Border = Border.none,
+    @pad : Edges = Edges.zero,
+    @mar : Edges = Edges.zero,
+    @min_width : Int32 = 0,
+    @align_mode : Symbol = :left,
+    @is_bold : Bool = false,
+    @is_italic : Bool = false,
+    @is_underline : Bool = false,
+    @is_dim : Bool = false
+  )
+  end
+
+  def self.new_style : Style
+    Style.new
+  end
+
+  def bold(enabled : Bool = true) : Style
+    copy_with(is_bold: enabled)
+  end
+
+  def italic(enabled : Bool = true) : Style
+    copy_with(is_italic: enabled)
+  end
+
+  def underline(enabled : Bool = true) : Style
+    copy_with(is_underline: enabled)
+  end
+
+  def dim(enabled : Bool = true) : Style
+    copy_with(is_dim: enabled)
+  end
+
+  def foreground(color : Color) : Style
+    copy_with(fg: color)
+  end
+
+  def background(color : Color) : Style
+    copy_with(bg: color)
+  end
+
+  def border_foreground(color : Color) : Style
+    copy_with(border_fg: color)
+  end
+
+  def border_background(color : Color) : Style
+    copy_with(border_bg: color)
+  end
+
+  def border(border_style : Border) : Style
+    copy_with(border_style: border_style)
+  end
+
+  def border(kind : Symbol) : Style
+    resolved = case kind
+               when :single  then Border.single
+               when :rounded then Border.rounded
+               when :double  then Border.double
+               when :thick   then Border.thick
+               else               Border.none
+               end
+    copy_with(border_style: resolved)
+  end
+
+  def padding(all_sides : Int32) : Style
+    copy_with(pad: Edges.all(all_sides))
+  end
+
+  def padding(vertical : Int32, horizontal : Int32) : Style
+    copy_with(pad: Edges.symmetric(vertical, horizontal))
+  end
+
+  def padding(top : Int32, right : Int32, bottom : Int32, left : Int32) : Style
+    copy_with(pad: Edges.new(top, right, bottom, left))
+  end
+
+  def margin(all_sides : Int32) : Style
+    copy_with(mar: Edges.all(all_sides))
+  end
+
+  def margin(vertical : Int32, horizontal : Int32) : Style
+    copy_with(mar: Edges.symmetric(vertical, horizontal))
+  end
+
+  def margin(top : Int32, right : Int32, bottom : Int32, left : Int32) : Style
+    copy_with(mar: Edges.new(top, right, bottom, left))
+  end
+
+  def width(w : Int32) : Style
+    copy_with(min_width: w < 0 ? 0 : w)
+  end
+
+  def align(mode : Symbol) : Style
+    copy_with(align_mode: mode)
+  end
+
+  def render(text : String) : String
+    raw_lines = text.empty? ? [""] : text.split('\n')
+    content_w = compute_content_width(raw_lines)
+    total_inner_w = content_w + @pad.horizontal
+
+    padded_lines = apply_padding_and_style(raw_lines, content_w, total_inner_w)
+    boxed_lines = @border_style.render_box(padded_lines, total_inner_w, @border_fg, @border_bg)
+    final_lines = apply_margin(boxed_lines)
+
+    final_lines.join("\n")
+  end
+
+  def self.join_horizontal(blocks : Array(String), gap : Int32 = 2) : String
+    return "" if blocks.empty?
+    split_blocks = blocks.map { |b| b.split('\n') }
+    widths = split_blocks.map { |lines| max_line_width(lines) }
+    max_lines = split_blocks.reduce(0) { |acc, lines| lines.size > acc ? lines.size : acc }
+    gap_str = " " * (gap < 0 ? 0 : gap)
+
+    rows = Array(String).new(max_lines)
+    row_idx = 0
+    while row_idx < max_lines
+      row_parts = Array(String).new(split_blocks.size)
+      col_idx = 0
+      while col_idx < split_blocks.size
+        lines = split_blocks[col_idx]
+        col_w = widths[col_idx]
+        line = row_idx < lines.size ? lines[row_idx] : ""
+        row_parts << Ansi.pad_visible(line, col_w, :left)
+        col_idx = col_idx + 1
+      end
+      rows << row_parts.join(gap_str)
+      row_idx = row_idx + 1
+    end
+    rows.join("\n")
+  end
+
+  def self.join_vertical(blocks : Array(String)) : String
+    blocks.join("\n")
+  end
+
+  private def text_sgr_codes : Array(String)
+    codes = [] of String
+    codes << "1" if @is_bold
+    codes << "2" if @is_dim
+    codes << "3" if @is_italic
+    codes << "4" if @is_underline
+    codes << @fg.fg_sgr unless @fg.none?
+    codes << @bg.bg_sgr unless @bg.none?
+    codes
+  end
+
+  private def bg_only_sgr_codes : Array(String)
+    codes = [] of String
+    codes << @bg.bg_sgr unless @bg.none?
+    codes
+  end
+
+  private def compute_content_width(lines : Array(String)) : Int32
+    natural = Style.max_line_width(lines)
+    @min_width > natural ? @min_width : natural
+  end
+
+  protected def self.max_line_width(lines : Array(String)) : Int32
+    lines.reduce(0) do |max_w, line|
+      w = Ansi.visible_width(line)
+      w > max_w ? w : max_w
+    end
+  end
+
+  private def apply_padding_and_style(lines : Array(String), content_w : Int32, total_inner_w : Int32) : Array(String)
+    text_codes = text_sgr_codes
+    bg_codes = bg_only_sgr_codes
+    left_pad = " " * @pad.left
+    right_pad = " " * @pad.right
+    blank_inner = Ansi.wrap(" " * total_inner_w, bg_codes)
+
+    result = Array(String).new(lines.size + @pad.vertical)
+    @pad.top.times { result << blank_inner }
+
+    lines.each do |line|
+      aligned = Ansi.pad_visible(line, content_w, @align_mode)
+      full_line = left_pad + aligned + right_pad
+      result << Ansi.wrap(full_line, text_codes)
+    end
+
+    @pad.bottom.times { result << blank_inner }
+    result
+  end
+
+  private def apply_margin(lines : Array(String)) : Array(String)
+    return lines if @mar.horizontal == 0 && @mar.vertical == 0
+
+    left_mar = " " * @mar.left
+    right_mar = " " * @mar.right
+    result = Array(String).new(lines.size + @mar.vertical)
+
+    @mar.top.times { result << "" }
+    lines.each do |line|
+      result << (left_mar + line + right_mar)
+    end
+    @mar.bottom.times { result << "" }
+    result
+  end
+
+  private def copy_with(
+    fg : Color = @fg,
+    bg : Color = @bg,
+    border_fg : Color = @border_fg,
+    border_bg : Color = @border_bg,
+    border_style : Border = @border_style,
+    pad : Edges = @pad,
+    mar : Edges = @mar,
+    min_width : Int32 = @min_width,
+    align_mode : Symbol = @align_mode,
+    is_bold : Bool = @is_bold,
+    is_italic : Bool = @is_italic,
+    is_underline : Bool = @is_underline,
+    is_dim : Bool = @is_dim
+  ) : Style
+    Style.new(
+      fg: fg,
+      bg: bg,
+      border_fg: border_fg,
+      border_bg: border_bg,
+      border_style: border_style,
+      pad: pad,
+      mar: mar,
+      min_width: min_width,
+      align_mode: align_mode,
+      is_bold: is_bold,
+      is_italic: is_italic,
+      is_underline: is_underline,
+      is_dim: is_dim
+    )
+  end
+end

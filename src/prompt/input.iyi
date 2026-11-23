@@ -1,0 +1,80 @@
+module src/prompt/input
+
+import src/core/key::{KeyEvent, KeyKind}
+import src/core/terminal::{Terminal}
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct InputPrompt
+  getter title : String
+  getter value : String
+  getter placeholder : String
+  getter done : Bool
+  getter accent_color : Color
+
+  def initialize(
+    @title : String,
+    @value : String = "",
+    @placeholder : String = "",
+    @done : Bool = false,
+    @accent_color : Color = Theme.iyi.secondary
+  )
+  end
+
+  def with_color(color : Color) : InputPrompt
+    InputPrompt.new(@title, @value, @placeholder, @done, color)
+  end
+
+  def result_value : String
+    (@value.empty? && !@placeholder.empty?) ? @placeholder : @value
+  end
+
+  def handle_key(key : KeyEvent) : InputPrompt
+    if key.is_enter? || key.is_ctrl_c? || key.is_escape?
+      InputPrompt.new(@title, @value, @placeholder, true, @accent_color)
+    elsif key.is_backspace? || key.is_delete?
+      InputPrompt.new(@title, Ansi.drop_last_char(@value), @placeholder, false, @accent_color)
+    elsif key.kind == KeyKind::Char || key.kind == KeyKind::Space
+      InputPrompt.new(@title, @value + key.text, @placeholder, false, @accent_color)
+    else
+      self
+    end
+  end
+
+  def render : String
+    q_mark = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str = Style.new_style.bold.foreground(Theme.iyi.text).render(@title)
+    hint_str = (!@placeholder.empty? && @value.empty?) ? Style.new_style.dim.foreground(Theme.iyi.muted).render("(#{@placeholder}) ") : ""
+    val_str = Style.new_style.bold.foreground(@accent_color).render(@value)
+    cursor_block = Style.new_style.foreground(Theme.iyi.primary).render("█")
+    "#{q_mark} #{title_str} #{hint_str}#{val_str}#{cursor_block}"
+  end
+
+  def self.ask(title : String, placeholder : String = "") : String
+    state = InputPrompt.new(title, "", placeholder, false)
+    tty = Terminal.tty?
+
+    final_val = Terminal.with_raw_mode(hide_cursor_on_enter: true) do
+      while !state.done
+        if tty
+          STDOUT.write("\e[2K\r" + state.render)
+        end
+        key = KeyEvent.read
+        break if key.none?
+        state = state.handle_key(key)
+      end
+      if tty
+        STDOUT.write("\e[2K\r")
+      end
+      state.result_value
+    end
+
+    check_icon = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str  = Style.new_style.bold.foreground(Theme.iyi.text).render(title)
+    ans_str    = Style.new_style.bold.foreground(Theme.iyi.secondary).render(final_val)
+    puts "#{check_icon} #{title_str} #{ans_str}"
+    final_val
+  end
+end

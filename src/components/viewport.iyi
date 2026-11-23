@@ -1,0 +1,160 @@
+module src/components/viewport
+
+import src/core/key::{KeyEvent}
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct Viewport
+  getter lines : Array(String)
+  getter offset : Int32
+  getter width : Int32
+  getter height : Int32
+  getter show_scrollbar : Bool
+  getter thumb_color : Color
+  getter track_color : Color
+
+  def initialize(
+    @lines : Array(String) = [] of String,
+    offset : Int32 = 0,
+    width : Int32 = 48,
+    height : Int32 = 10,
+    @show_scrollbar : Bool = true,
+    @thumb_color : Color = Theme.iyi.secondary,
+    @track_color : Color = Theme.iyi.surface_alt
+  )
+    @width = width < 8 ? 8 : width
+    @height = height < 2 ? 2 : height
+    max_off = max_offset_for(@lines.size, @height)
+    @offset = offset < 0 ? 0 : (offset > max_off ? max_off : offset)
+  end
+
+  def self.from_text(text : String, width : Int32 = 48, height : Int32 = 10) : Viewport
+    Viewport.new(text.split('\n'), 0, width, height)
+  end
+
+  def max_offset : Int32
+    max_offset_for(@lines.size, @height)
+  end
+
+  def at_top? : Bool
+    @offset <= 0
+  end
+
+  def at_bottom? : Bool
+    @offset >= max_offset
+  end
+
+  def scroll_percent : Int32
+    m = max_offset
+    return 100 if m <= 0
+    (@offset * 100) // m
+  end
+
+  def scroll_up(step : Int32 = 1) : Viewport
+    s = step < 1 ? 1 : step
+    with_offset(@offset - s)
+  end
+
+  def scroll_down(step : Int32 = 1) : Viewport
+    s = step < 1 ? 1 : step
+    with_offset(@offset + s)
+  end
+
+  def page_up : Viewport
+    scroll_up(@height - 1)
+  end
+
+  def page_down : Viewport
+    scroll_down(@height - 1)
+  end
+
+  def goto_top : Viewport
+    with_offset(0)
+  end
+
+  def goto_bottom : Viewport
+    with_offset(max_offset)
+  end
+
+  def with_offset(new_offset : Int32) : Viewport
+    Viewport.new(@lines, new_offset, @width, @height, @show_scrollbar, @thumb_color, @track_color)
+  end
+
+  def with_size(new_width : Int32, new_height : Int32) : Viewport
+    Viewport.new(@lines, @offset, new_width, new_height, @show_scrollbar, @thumb_color, @track_color)
+  end
+
+  def with_lines(new_lines : Array(String), follow_bottom : Bool = false) : Viewport
+    vp = Viewport.new(new_lines, @offset, @width, @height, @show_scrollbar, @thumb_color, @track_color)
+    follow_bottom ? vp.goto_bottom : vp
+  end
+
+  def with_colors(thumb_c : Color, track_c : Color = @track_color) : Viewport
+    Viewport.new(@lines, @offset, @width, @height, @show_scrollbar, thumb_c, track_c)
+  end
+
+  def append_line(line : String, follow_bottom : Bool = true) : Viewport
+    updated = @lines + [line]
+    with_lines(updated, follow_bottom)
+  end
+
+  def handle_key(key : KeyEvent) : Viewport
+    if key.is_up? || key.is_wheel_up?
+      scroll_up(1)
+    elsif key.is_down? || key.is_wheel_down?
+      scroll_down(1)
+    elsif key.is_page_up?
+      page_up
+    elsif key.is_page_down?
+      page_down
+    elsif key.is_home?
+      goto_top
+    elsif key.is_end?
+      goto_bottom
+    else
+      self
+    end
+  end
+
+  def render(focused : Bool = false) : String
+    content_w = @show_scrollbar ? (@width - 2) : @width
+    content_w = 4 if content_w < 4
+
+    thumb_row = compute_thumb_row
+    active_thumb_color = focused ? @thumb_color : Theme.iyi.primary
+    thumb_glyph = Style.new_style.bold.foreground(active_thumb_color).render("┃")
+    track_glyph = Style.new_style.foreground(@track_color).render("│")
+
+    output = Array(String).new(@height)
+    row_i = 0
+    while row_i < @height
+      line_idx = @offset + row_i
+      raw_line = line_idx < @lines.size ? @lines[line_idx] : ""
+      fitted = Ansi.truncate_visible(raw_line, content_w)
+      padded = Ansi.pad_visible(fitted, content_w, :left)
+
+      if @show_scrollbar
+        bar = (row_i == thumb_row) ? thumb_glyph : track_glyph
+        output << (padded + " " + bar)
+      else
+        output << padded
+      end
+      row_i = row_i + 1
+    end
+
+    output.join("\n")
+  end
+
+  private def compute_thumb_row : Int32
+    m = max_offset
+    return 0 if m <= 0 || @height <= 1
+    (@offset * (@height - 1)) // m
+  end
+
+  private def max_offset_for(total_lines : Int32, view_height : Int32) : Int32
+    diff = total_lines - view_height
+    diff > 0 ? diff : 0
+  end
+end

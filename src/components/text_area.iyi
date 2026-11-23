@@ -1,0 +1,278 @@
+module src/components/text_area
+
+import src/core/key::{KeyEvent, KeyKind}
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct TextArea
+  getter lines : Array(String)
+  getter cursor_row : Int32
+  getter cursor_col : Int32
+  getter width : Int32
+  getter height : Int32
+  getter show_line_numbers : Bool
+  getter line_number_color : Color
+  getter cursor_color : Color
+  getter text_color : Color
+
+  def initialize(
+    lines : Array(String) = [""],
+    cursor_row : Int32 = 0,
+    cursor_col : Int32 = 0,
+    width : Int32 = 48,
+    height : Int32 = 6,
+    @show_line_numbers : Bool = true,
+    @line_number_color : Color = Theme.iyi.secondary,
+    @cursor_color : Color = Theme.iyi.primary,
+    @text_color : Color = Theme.iyi.text
+  )
+    @lines = lines.empty? ? [""] : lines
+    max_row = @lines.size - 1
+    @cursor_row = cursor_row < 0 ? 0 : (cursor_row > max_row ? max_row : cursor_row)
+    line_len = @lines[@cursor_row].size
+    @cursor_col = cursor_col < 0 ? 0 : (cursor_col > line_len ? line_len : cursor_col)
+    @width = width < 10 ? 10 : width
+    @height = height < 2 ? 2 : height
+  end
+
+  def self.from_text(text : String, width : Int32 = 48, height : Int32 = 6) : TextArea
+    split = text.empty? ? [""] : text.split('\n')
+    last_row = split.size - 1
+    last_col = split[last_row].size
+    TextArea.new(split, last_row, last_col, width, height)
+  end
+
+  def value : String
+    @lines.join("\n")
+  end
+
+  def line_count : Int32
+    @lines.size
+  end
+
+  def insert_text(str : String) : TextArea
+    return self if str.empty?
+    current_line = @lines[@cursor_row]
+    left_part, right_part = split_char_at(current_line, @cursor_col)
+    updated_line = left_part + str + right_part
+
+    next_lines = @lines.dup
+    next_lines[@cursor_row] = updated_line
+    with_state(next_lines, @cursor_row, @cursor_col + str.size)
+  end
+
+  def insert_newline : TextArea
+    current_line = @lines[@cursor_row]
+    left_part, right_part = split_char_at(current_line, @cursor_col)
+
+    next_lines = Array(String).new(@lines.size + 1)
+    idx = 0
+    while idx < @lines.size
+      if idx == @cursor_row
+        next_lines << left_part
+        next_lines << right_part
+      else
+        next_lines << @lines[idx]
+      end
+      idx = idx + 1
+    end
+
+    with_state(next_lines, @cursor_row + 1, 0)
+  end
+
+  def backspace : TextArea
+    if @cursor_col > 0
+      current_line = @lines[@cursor_row]
+      left_part, right_part = split_char_at(current_line, @cursor_col)
+      trimmed_left, _ = split_char_at(left_part, @cursor_col - 1)
+      next_lines = @lines.dup
+      next_lines[@cursor_row] = trimmed_left + right_part
+      return with_state(next_lines, @cursor_row, @cursor_col - 1)
+    elsif @cursor_row > 0
+      prev_line = @lines[@cursor_row - 1]
+      curr_line = @lines[@cursor_row]
+      new_col = prev_line.size
+
+      next_lines = Array(String).new(@lines.size - 1)
+      idx = 0
+      while idx < @lines.size
+        if idx == @cursor_row - 1
+          next_lines << (prev_line + curr_line)
+        elsif idx != @cursor_row
+          next_lines << @lines[idx]
+        end
+        idx = idx + 1
+      end
+      return with_state(next_lines, @cursor_row - 1, new_col)
+    end
+    self
+  end
+
+  def move_up : TextArea
+    return self if @cursor_row <= 0
+    target_row = @cursor_row - 1
+    target_len = @lines[target_row].size
+    target_col = @cursor_col <= target_len ? @cursor_col : target_len
+    with_state(@lines, target_row, target_col)
+  end
+
+  def move_down : TextArea
+    return self if @cursor_row >= @lines.size - 1
+    target_row = @cursor_row + 1
+    target_len = @lines[target_row].size
+    target_col = @cursor_col <= target_len ? @cursor_col : target_len
+    with_state(@lines, target_row, target_col)
+  end
+
+  def move_left : TextArea
+    if @cursor_col > 0
+      with_state(@lines, @cursor_row, @cursor_col - 1)
+    elsif @cursor_row > 0
+      prev_row = @cursor_row - 1
+      with_state(@lines, prev_row, @lines[prev_row].size)
+    else
+      self
+    end
+  end
+
+  def move_right : TextArea
+    curr_len = @lines[@cursor_row].size
+    if @cursor_col < curr_len
+      with_state(@lines, @cursor_row, @cursor_col + 1)
+    elsif @cursor_row < @lines.size - 1
+      with_state(@lines, @cursor_row + 1, 0)
+    else
+      self
+    end
+  end
+
+  def move_line_start : TextArea
+    with_state(@lines, @cursor_row, 0)
+  end
+
+  def move_line_end : TextArea
+    with_state(@lines, @cursor_row, @lines[@cursor_row].size)
+  end
+
+  def handle_key(key : KeyEvent) : TextArea
+    if key.kind == KeyKind::Up
+      move_up
+    elsif key.kind == KeyKind::Down
+      move_down
+    elsif key.kind == KeyKind::Left
+      move_left
+    elsif key.kind == KeyKind::Right
+      move_right
+    elsif key.is_home?
+      move_line_start
+    elsif key.is_end?
+      move_line_end
+    elsif key.is_enter?
+      insert_newline
+    elsif key.is_backspace? || key.is_delete?
+      backspace
+    elsif key.kind == KeyKind::Char || key.kind == KeyKind::Space
+      insert_text(key.text)
+    else
+      self
+    end
+  end
+
+  def render(focused : Bool = true) : String
+    start_row = compute_scroll_start
+    gutter_w = @show_line_numbers ? 5 : 0
+    content_w = @width - gutter_w
+    content_w = 4 if content_w < 4
+
+    output = Array(String).new(@height)
+    i = 0
+    while i < @height
+      row_idx = start_row + i
+      if row_idx < @lines.size
+        gutter = @show_line_numbers ? format_line_number(row_idx + 1, row_idx == @cursor_row) : ""
+        line_text = render_line_with_cursor(@lines[row_idx], row_idx == @cursor_row && focused, content_w)
+        output << (gutter + line_text)
+      else
+        tilde_gutter = @show_line_numbers ? Style.new_style.dim.foreground(Theme.iyi.surface_alt).render("   ~ ") : ""
+        output << (tilde_gutter + (" " * content_w))
+      end
+      i = i + 1
+    end
+
+    output.join("\n")
+  end
+
+  private def compute_scroll_start : Int32
+    return 0 if @lines.size <= @height
+    half = @height // 2
+    start_r = @cursor_row - half
+    start_r = 0 if start_r < 0
+    if start_r + @height > @lines.size
+      start_r = @lines.size - @height
+    end
+    start_r
+  end
+
+  private def format_line_number(num : Int32, is_active : Bool) : String
+    num_str = num.to_s.rjust(2) + " │ "
+    if is_active
+      Style.new_style.bold.foreground(@line_number_color).render(num_str)
+    else
+      Style.new_style.dim.foreground(Theme.iyi.muted).render(num_str)
+    end
+  end
+
+  private def render_line_with_cursor(line : String, show_cursor : Bool, max_w : Int32) : String
+    text_s = Style.new_style.foreground(@text_color)
+    if !show_cursor
+      padded = Ansi.pad_visible(line, max_w, :left)
+      return text_s.render(padded)
+    end
+
+    left_part, right_part = split_char_at(line, @cursor_col)
+    cursor_ch = " "
+    rest_right = ""
+    if !right_part.empty?
+      cursor_ch, rest_right = split_char_at(right_part, 1)
+    end
+
+    cur_style = Style.new_style.bold.foreground(Theme.iyi.text).background(@cursor_color)
+    rendered = text_s.render(left_part) + cur_style.render(cursor_ch) + text_s.render(rest_right)
+    Ansi.pad_visible(rendered, max_w, :left)
+  end
+
+  # Splits a string by UTF-8 codepoint index rather than byte offset (`String#[start, count]` is byte-based).
+  private def split_char_at(text : String, char_index : Int32) : {String, String}
+    return {"", text} if char_index <= 0
+    return {text, ""} if char_index >= text.size
+
+    left_io = String::Builder.new(text.bytesize)
+    right_io = String::Builder.new(text.bytesize)
+    idx = 0
+    text.each_char do |ch|
+      if idx < char_index
+        left_io << ch
+      else
+        right_io << ch
+      end
+      idx = idx + 1
+    end
+    {left_io.to_s, right_io.to_s}
+  end
+
+  private def with_state(new_lines : Array(String), new_row : Int32, new_col : Int32) : TextArea
+    TextArea.new(
+      new_lines,
+      new_row,
+      new_col,
+      @width,
+      @height,
+      @show_line_numbers,
+      @line_number_color,
+      @cursor_color,
+      @text_color
+    )
+  end
+end

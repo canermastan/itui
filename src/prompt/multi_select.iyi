@@ -1,0 +1,151 @@
+module src/prompt/multi_select
+
+import src/core/key::{KeyEvent, KeyBinding}
+import src/core/terminal::{Terminal}
+import src/components/help_bar::{HelpBar}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct MultiSelectPrompt
+  getter title : String
+  getter options : Array(String)
+  getter checked : Array(Bool)
+  getter cursor : Int32
+  getter done : Bool
+  getter active_color : Color
+  getter checked_color : Color
+
+  def initialize(
+    @title : String,
+    @options : Array(String),
+    checked : Array(Bool) = [] of Bool,
+    cursor : Int32 = 0,
+    @done : Bool = false,
+    @active_color : Color = Theme.iyi.secondary,
+    @checked_color : Color = Theme.iyi.primary
+  )
+    max_idx = @options.empty? ? 0 : @options.size - 1
+    @cursor = cursor < 0 ? 0 : (cursor > max_idx ? max_idx : cursor)
+    if checked.size == @options.size
+      @checked = checked
+    else
+      @checked = Array(Bool).new(@options.size, false)
+    end
+  end
+
+  def with_colors(active_c : Color, checked_c : Color = @checked_color) : MultiSelectPrompt
+    MultiSelectPrompt.new(@title, @options, @checked, @cursor, @done, active_c, checked_c)
+  end
+
+  def selected_items : Array(String)
+    result = [] of String
+    idx = 0
+    while idx < @options.size
+      result << @options[idx] if @checked[idx]
+      idx = idx + 1
+    end
+    result
+  end
+
+  def toggle_current : MultiSelectPrompt
+    return self if @options.empty?
+    next_checked = @checked.dup
+    next_checked[@cursor] = !next_checked[@cursor]
+    MultiSelectPrompt.new(@title, @options, next_checked, @cursor, @done, @active_color, @checked_color)
+  end
+
+  def handle_key(key : KeyEvent) : MultiSelectPrompt
+    return self if @options.empty?
+    if key.is_up?
+      next_c = @cursor > 0 ? (@cursor - 1) : (@options.size - 1)
+      MultiSelectPrompt.new(@title, @options, @checked, next_c, false, @active_color, @checked_color)
+    elsif key.is_down?
+      next_c = (@cursor + 1) % @options.size
+      MultiSelectPrompt.new(@title, @options, @checked, next_c, false, @active_color, @checked_color)
+    elsif key.is_space?
+      toggle_current
+    elsif key.matches?("a")
+      all_on = @checked.all? { |flag| flag }
+      toggled = Array(Bool).new(@options.size, !all_on)
+      MultiSelectPrompt.new(@title, @options, toggled, @cursor, false, @active_color, @checked_color)
+    elsif key.is_enter? || key.is_quit?
+      MultiSelectPrompt.new(@title, @options, @checked, @cursor, true, @active_color, @checked_color)
+    else
+      self
+    end
+  end
+
+  def render : String
+    q_mark = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str = Style.new_style.bold.foreground(Theme.iyi.text).render(@title)
+    header = q_mark + " " + title_str
+
+    active_style  = Style.new_style.bold.foreground(@active_color)
+    checked_style = Style.new_style.bold.foreground(@checked_color)
+    normal_style  = Style.new_style.foreground(Theme.iyi.muted)
+
+    lines = [header]
+    idx = 0
+    while idx < @options.size
+      opt = @options[idx]
+      is_cur = idx == @cursor
+      is_chk = @checked[idx]
+      pointer = is_cur ? ("  " + checked_style.render("▸ ")) : "    "
+      box = is_chk ? checked_style.render("[✓]") : normal_style.render("[ ]")
+      label = is_cur ? active_style.render(opt) : (is_chk ? checked_style.render(opt) : normal_style.render(opt))
+      lines << (pointer + box + " " + label)
+      idx = idx + 1
+    end
+
+    help = HelpBar.new([
+      KeyBinding.on_any(["up", "down"], "↑/↓", "gezin"),
+      KeyBinding.on("space", "space", "seç/bırak"),
+      KeyBinding.on("a", "a", "tümü"),
+      KeyBinding.on("enter", "enter", "onayla")
+    ])
+    lines << "  " + help.render
+    lines.join("\n")
+  end
+
+  def self.ask(title : String, options : Array(String)) : Array(String)
+    return [] of String if options.empty?
+    state = MultiSelectPrompt.new(title, options)
+    tty = Terminal.tty?
+
+    chosen = Terminal.with_raw_mode(hide_cursor_on_enter: true) do
+      printed_lines = 0
+      while !state.done
+        if tty
+          if printed_lines > 0
+            Terminal.cursor_up(printed_lines)
+          end
+          view = state.render
+          view_lines = view.split('\n')
+          view_lines.each do |line|
+            STDOUT.write("\e[2K\r" + line + "\r\n")
+          end
+          printed_lines = view_lines.size
+        end
+
+        key = KeyEvent.read
+        break if key.none?
+        state = state.handle_key(key)
+      end
+
+      if tty && printed_lines > 0
+        Terminal.cursor_up(printed_lines)
+        printed_lines.times { STDOUT.write("\e[2K\r\n") }
+        Terminal.cursor_up(printed_lines)
+      end
+      state.selected_items
+    end
+
+    check_icon = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str  = Style.new_style.bold.foreground(Theme.iyi.text).render(title)
+    summary    = chosen.empty? ? "(hiçbiri)" : chosen.join(", ")
+    ans_str    = Style.new_style.bold.foreground(Theme.iyi.secondary).render(summary)
+    puts "#{check_icon} #{title_str} #{ans_str}"
+    chosen
+  end
+end

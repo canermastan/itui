@@ -1,0 +1,167 @@
+module tests/style_test
+
+import src/style/ansi::{Ansi}
+import src/style/color::{Color, ColorKind}
+import src/style/border::{Border}
+import src/style/style::{Style, Edges}
+import src/style/theme::{Theme}
+
+def assert_eq(actual, expected, msg : String) : Nil
+  raise "Assertion failed: #{msg} (expected: #{expected.inspect}, got: #{actual.inspect})" unless actual == expected
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "Assertion failed: #{msg}" unless cond
+end
+
+test "Theme.iyi exposes exact official mascot TrueColor RGB values" do
+  t = Theme.iyi
+  assert_eq(t.primary.fg_sgr, "38;2;225;29;72", "primary should be #E11D48")
+  assert_eq(t.primary_bold.fg_sgr, "38;2;220;38;38", "primary_bold should be #DC2626")
+  assert_eq(t.secondary.fg_sgr, "38;2;250;204;21", "secondary should be #FACC15")
+  assert_eq(t.accent.fg_sgr, "38;2;245;158;11", "accent should be #F59E0B")
+  assert_eq(t.muted.fg_sgr, "38;2;253;164;175", "muted should be #FDA4AF")
+  assert_eq(t.surface.bg_sgr, "48;2;42;10;18", "surface should be #2A0A12")
+  assert_eq(t.surface_alt.bg_sgr, "48;2;69;10;10", "surface_alt should be #450A0A")
+  assert_eq(t.text.fg_sgr, "38;2;248;250;252", "text should be #F8FAFC")
+end
+
+test "Custom Theme overrides only specified colors while keeping others" do
+  custom = Theme.new(primary: Color.hex("#00FF00"), secondary: Color.ansi256(200))
+  assert_eq(custom.primary.fg_sgr, "38;2;0;255;0", "custom primary should apply")
+  assert_eq(custom.secondary.fg_sgr, "38;5;200", "custom secondary should apply")
+  assert_eq(custom.text.fg_sgr, "38;2;248;250;252", "unmodified text color should stay default")
+end
+
+test "Color encodes ANSI-16 foreground and background (+10 offset) properly" do
+  assert_eq(Color.red.fg_sgr, "31", "red fg")
+  assert_eq(Color.red.bg_sgr, "41", "red bg")
+  assert_eq(Color.white.fg_sgr, "97", "bright white fg")
+  assert_eq(Color.white.bg_sgr, "107", "bright white bg")
+  assert_eq(Color.none.fg_sgr, "", "none fg should be empty")
+  assert_eq(Color.none.bg_sgr, "", "none bg should be empty")
+end
+
+test "Color.hex supports leading #, without #, uppercase, lowercase, and rejects invalid lengths" do
+  c1 = Color.hex("#ff0aB2")
+  c2 = Color.hex("FF0Ab2")
+  assert_eq(c1.r, 255_u8, "r should be 255")
+  assert_eq(c1.g, 10_u8, "g should be 10")
+  assert_eq(c1.b, 178_u8, "b should be 178")
+  assert_eq(c1.fg_sgr, c2.fg_sgr, "hex parsing should be case-insensitive and optional #")
+
+  assert_true(Color.hex("").none?, "empty hex -> none")
+  assert_true(Color.hex("#FFF").none?, "3-char hex -> none")
+  assert_true(Color.hex("#1234567").none?, "7-char hex -> none")
+end
+
+test "Color.rgb and Color.ansi256 clamp out-of-range integers safely" do
+  c_low = Color.rgb(-100, -1, 0)
+  assert_eq(c_low.fg_sgr, "38;2;0;0;0", "negative RGB should clamp to 0")
+
+  c_high = Color.rgb(256, 9999, 500)
+  assert_eq(c_high.fg_sgr, "38;2;255;255;255", "overflow RGB should clamp to 255")
+
+  assert_eq(Color.ansi256(-5).code, 0_u8, "negative 256-color should clamp to 0")
+  assert_eq(Color.ansi256(300).code, 255_u8, ">255 256-color should clamp to 255")
+end
+
+test "Ansi.visible_width counts UTF-8 characters (Turkish, box glyphs) and ignores ANSI codes" do
+  turkish = "Çağıl Şeker ÖĞÜİ"
+  assert_eq(Ansi.visible_width(turkish), 16, "Turkish multi-byte chars should count as 1 char each")
+  assert_true(turkish.bytesize > 16, "bytesize should be larger than visible_width")
+
+  styled = Ansi.wrap(turkish, ["1", "38;2;225;29;72", "48;2;42;10;18"])
+  assert_eq(Ansi.visible_width(styled), 16, "visible_width must ignore all SGR parameters")
+  assert_eq(Ansi.strip(styled), turkish, "strip must recover exact UTF-8 text")
+end
+
+test "Ansi.wrap restores outer SGR prefix after inner reset sequences (no color bleed/drop)" do
+  inner = Ansi.wrap("GOLD", ["1", "38;2;250;204;21"])
+  outer = Ansi.wrap("A " + inner + " B", ["48;2;42;10;18"])
+
+  assert_true(outer.includes?("\e[0m\e[48;2;42;10;18m B\e[0m"), "outer SGR must resume after inner reset")
+  assert_eq(Ansi.strip(outer), "A GOLD B", "stripped text must remain intact")
+end
+
+test "Ansi.wrap_lines wraps each line independently without spanning newlines" do
+  wrapped = Ansi.wrap_lines("one\n\ntwo", ["31"])
+  lines = wrapped.split('\n')
+  assert_eq(lines.size, 3, "should preserve 3 lines")
+  assert_eq(lines[0], "\e[31mone\e[0m", "line 0 wrapped")
+  assert_eq(lines[1], "", "empty line stays empty")
+  assert_eq(lines[2], "\e[31mtwo\e[0m", "line 2 wrapped")
+end
+
+test "Ansi.pad_visible aligns left, center, and right accurately on ANSI-colored UTF-8 strings" do
+  colored = Ansi.wrap("Şık", ["31"])
+  assert_eq(Ansi.strip(Ansi.pad_visible(colored, 7, :left)), "Şık    ", "left align")
+  assert_eq(Ansi.strip(Ansi.pad_visible(colored, 7, :right)), "    Şık", "right align")
+  assert_eq(Ansi.strip(Ansi.pad_visible(colored, 7, :center)), "  Şık  ", "center align (even extra)")
+  assert_eq(Ansi.strip(Ansi.pad_visible(colored, 8, :center)), "  Şık   ", "center align (odd extra)")
+  assert_eq(Ansi.strip(Ansi.pad_visible(colored, 2, :center)), "Şık", "wider than target returns unchanged")
+end
+
+test "Style builder is strictly immutable (chaining never mutates base style)" do
+  base = Style.new_style.foreground(Color.red).padding(1, 2)
+  derived = base.bold.border(:rounded).width(40).margin(2)
+
+  assert_true(!base.is_bold, "base must remain non-bold")
+  assert_true(base.border_style.none?, "base must remain borderless")
+  assert_eq(base.min_width, 0, "base min_width must remain 0")
+  assert_eq(base.mar.top, 0, "base margin must remain 0")
+
+  assert_true(derived.is_bold, "derived must be bold")
+  assert_true(!derived.border_style.none?, "derived must have border")
+  assert_eq(derived.min_width, 40, "derived min_width must be 40")
+end
+
+test "Every line of a bordered Style box has identical visible width across multi-line UTF-8 content" do
+  box = Style.new_style
+    .border(:double)
+    .border_foreground(Theme.iyi.primary)
+    .background(Theme.iyi.surface)
+    .padding(1, 3)
+    .width(24)
+    .align(:center)
+    .render("Kısa\nÇok daha uzun bir Türkçe satır!\n♥")
+
+  lines = box.split('\n')
+  assert_eq(lines.size, 7, "expected 7 total lines")
+
+  expected_w = Ansi.visible_width(lines[0])
+  lines.each_with_index do |line, i|
+    assert_eq(Ansi.visible_width(line), expected_w, "box line #{i} must match top border width")
+  end
+  assert_true(Ansi.strip(lines[0]).starts_with?("╔"), "top-left double corner")
+  assert_true(Ansi.strip(lines[6]).ends_with?("╝"), "bottom-right double corner")
+end
+
+test "Style.join_horizontal aligns blocks of unequal heights and widths cleanly" do
+  tall = Style.new_style.border(:single).width(8).render("A1\nA2\nA3")
+  short = Style.new_style.border(:rounded).width(6).render("B1")
+
+  joined = Style.join_horizontal([tall, short], gap: 3)
+  lines = joined.split('\n')
+  assert_eq(lines.size, 5, "height must equal tallest block")
+
+  lines.each_with_index do |line, i|
+    assert_eq(Ansi.visible_width(line), 21, "joined row #{i} width mismatch")
+  end
+end
+
+test "Style handles empty text, zero width, negative padding/margin, and all border presets" do
+  assert_eq(Edges.all(-10).horizontal, 0, "negative Edges.all clamps to 0")
+  assert_eq(Edges.symmetric(-3, -4).vertical, 0, "negative Edges.symmetric clamps to 0")
+
+  [:single, :rounded, :double, :thick, :none].each do |b_kind|
+    out = Style.new_style.border(b_kind).padding(0).margin(0).width(-5).render("")
+    lines = out.split('\n')
+    if b_kind == :none
+      assert_eq(lines.size, 1, "none border on empty string -> 1 line")
+    else
+      assert_eq(lines.size, 3, "#{b_kind} border on empty string -> 3 lines")
+      assert_eq(Ansi.visible_width(lines[0]), Ansi.visible_width(lines[2]), "#{b_kind} top/bottom widths match")
+    end
+  end
+end

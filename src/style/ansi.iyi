@@ -1,0 +1,126 @@
+module src/style/ansi
+
+pub struct Ansi
+  ESC   = "\e["
+  RESET = "\e[0m"
+
+  def self.sgr(codes : Array(String)) : String
+    return "" if codes.empty?
+    String.build do |io|
+      io << ESC
+      first = true
+      codes.each do |code|
+        if !code.empty?
+          io << ';' unless first
+          io << code
+          first = false
+        end
+      end
+      io << 'm'
+    end
+  end
+
+  # Re-injects the outer SGR prefix after any inner `\e[0m` so nested colored spans
+  # inside a styled line do not drop the outer background or foreground.
+  def self.wrap(text : String, codes : Array(String)) : String
+    return text if codes.empty? || text.empty?
+    prefix = sgr(codes)
+    return text if prefix.empty?
+    restored = restore_after_reset(text, prefix)
+    prefix + restored + RESET
+  end
+
+  private def self.restore_after_reset(text : String, prefix : String) : String
+    return text unless text.includes?(RESET)
+    pieces = [] of String
+    offset = 0
+    reset_len = RESET.bytesize
+    while idx = text.byte_index(RESET, offset)
+      pieces << text[offset, idx - offset]
+      after = idx + reset_len
+      if after < text.bytesize
+        pieces << RESET << prefix
+      else
+        pieces << RESET
+      end
+      offset = after
+    end
+    pieces << text[offset, text.bytesize - offset] if offset < text.bytesize
+    pieces.join
+  end
+
+  def self.wrap_lines(text : String, codes : Array(String)) : String
+    return text if codes.empty? || text.empty?
+    prefix = sgr(codes)
+    return text if prefix.empty?
+    text.split('\n').map { |line| line.empty? ? "" : prefix + line + RESET }.join("\n")
+  end
+
+  def self.strip(text : String) : String
+    return text unless text.includes?("\e[")
+    String.build(text.bytesize) do |io|
+      in_escape = false
+      text.each_char do |ch|
+        if in_escape
+          in_escape = false if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+        elsif ch == '\e'
+          in_escape = true
+        else
+          io << ch
+        end
+      end
+    end
+  end
+
+  def self.visible_width(line : String) : Int32
+    strip(line).size
+  end
+
+  def self.pad_visible(line : String, target_width : Int32, align : Symbol = :left, pad_char : Char = ' ') : String
+    current = visible_width(line)
+    return line if current >= target_width
+    extra = target_width - current
+    pad_str = pad_char.to_s
+    case align
+    when :right
+      (pad_str * extra) + line
+    when :center
+      left_pad = extra // 2
+      right_pad = extra - left_pad
+      (pad_str * left_pad) + line + (pad_str * right_pad)
+    else
+      line + (pad_str * extra)
+    end
+  end
+
+  def self.truncate_visible(text : String, max_w : Int32) : String
+    return text if visible_width(text) <= max_w
+    plain = strip(text)
+    return "" if max_w <= 0
+    return "…" if max_w == 1
+    String.build do |io|
+      count = 0
+      plain.each_char do |ch|
+        if count < max_w - 1
+          io << ch
+          count = count + 1
+        end
+      end
+      io << '…'
+    end
+  end
+
+  def self.drop_last_char(text : String) : String
+    total = text.size
+    return "" if total <= 1
+    String.build(text.bytesize) do |io|
+      count = 0
+      text.each_char do |ch|
+        if count < total - 1
+          io << ch
+          count = count + 1
+        end
+      end
+    end
+  end
+end

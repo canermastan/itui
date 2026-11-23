@@ -1,0 +1,113 @@
+@[Unsafe("reads raw bytes from standard input through the runtime's low-level reader")]
+module src/core/terminal
+
+import std/term::{Term, TermError}
+
+pub struct Terminal
+  HIDE_CURSOR      = "\e[?25l"
+  SHOW_CURSOR      = "\e[?25h"
+  CLEAR_SCREEN     = "\e[2J\e[H"
+  CURSOR_HOME      = "\e[H"
+  CLEAR_LINE       = "\e[2K\r"
+  CLEAR_TO_EOL     = "\e[K"
+  CLEAR_TO_EOS     = "\e[J"
+  ALT_SCREEN_ENTER = "\e[?1049h\e[2J\e[H"
+  ALT_SCREEN_EXIT  = "\e[?1049l"
+  # SGR extended mouse reporting (1000: click/wheel, 1006: SGR coordinate format \e[<b;x;yM/m)
+  MOUSE_ENABLE  = "\e[?1000h\e[?1006h"
+  MOUSE_DISABLE = "\e[?1006l\e[?1000l"
+
+  def self.tty? : Bool
+    Term.tty?(STDIN) && Term.tty?(STDOUT)
+  end
+
+  def self.size(default_rows : Int32 = 24, default_cols : Int32 = 80) : {Int32, Int32}
+    Term.size || {default_rows, default_cols}
+  end
+
+  def self.hide_cursor : Nil
+    STDOUT.write(HIDE_CURSOR)
+  end
+
+  def self.show_cursor : Nil
+    STDOUT.write(SHOW_CURSOR)
+  end
+
+  def self.clear_screen : Nil
+    STDOUT.write(CLEAR_SCREEN)
+  end
+
+  def self.cursor_home : Nil
+    STDOUT.write(CURSOR_HOME)
+  end
+
+  def self.clear_line : Nil
+    STDOUT.write(CLEAR_LINE)
+  end
+
+  def self.enter_alt_screen : Nil
+    STDOUT.write(ALT_SCREEN_ENTER)
+  end
+
+  def self.exit_alt_screen : Nil
+    STDOUT.write(ALT_SCREEN_EXIT)
+  end
+
+  def self.enable_mouse : Nil
+    STDOUT.write(MOUSE_ENABLE)
+  end
+
+  def self.disable_mouse : Nil
+    STDOUT.write(MOUSE_DISABLE)
+  end
+
+  def self.cursor_up(n : Int32) : Nil
+    return if n <= 0
+    STDOUT.write("\e[#{n}A\r")
+  end
+
+  def self.move_to(row : Int32, col : Int32) : Nil
+    r = row < 1 ? 1 : row
+    c = col < 1 ? 1 : col
+    STDOUT.write("\e[#{r};#{c}H")
+  end
+
+  def self.with_raw_mode(hide_cursor_on_enter : Bool = true, mouse : Bool = false, &block : -> T) : T forall T
+    if hide_cursor_on_enter
+      hide_cursor
+    end
+    defer show_cursor if hide_cursor_on_enter
+
+    if Term.tty?(STDIN)
+      outcome = Term.raw(STDIN) do
+        enable_mouse if mouse
+        defer disable_mouse if mouse
+        yield
+      end
+      case outcome
+      in T
+        return outcome
+      in TermError
+        return yield
+      end
+    else
+      yield
+    end
+  end
+
+  # Uses `iyi_read` directly instead of buffered `STDIN.read_bytes` so a single multi-byte
+  # CSI escape sequence (`\e[A` or SGR mouse `\e[<0;12;5M`) returns immediately.
+  def self.read_raw_chunk(max_bytes : Int32 = 64) : String
+    cap = max_bytes < 1 ? 1 : max_bytes
+    buf = Pointer(UInt8).malloc(cap.to_u64)
+    got = iyi_read(0_i64, buf.as(Void*), cap.to_u64)
+    case got
+    in Int64
+      return "" if got <= 0_i64
+      count = got.to_i32
+      String.new(count) { |target| target.copy_from(buf, count) }
+    in Cancelled
+      ""
+    end
+  end
+end

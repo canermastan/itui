@@ -1,0 +1,96 @@
+module src/components/tabs
+
+import src/core/key::{KeyEvent}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct Tabs
+  getter titles : Array(String)
+  getter active_index : Int32
+  getter active_bg : Color
+  getter active_fg : Color
+  getter inactive_fg : Color
+  getter accent_color : Color
+
+  def initialize(
+    @titles : Array(String),
+    active_index : Int32 = 0,
+    @active_bg : Color = Theme.iyi.primary,
+    @active_fg : Color = Theme.iyi.text,
+    @inactive_fg : Color = Theme.iyi.muted,
+    @accent_color : Color = Theme.iyi.secondary
+  )
+    count = @titles.size
+    @active_index = count == 0 ? 0 : ((active_index % count) + count) % count
+  end
+
+  def active_title : String
+    return "" if @titles.empty?
+    @titles[@active_index]
+  end
+
+  def next_tab : Tabs
+    return self if @titles.empty?
+    with_index((@active_index + 1) % @titles.size)
+  end
+
+  def prev_tab : Tabs
+    return self if @titles.empty?
+    count = @titles.size
+    with_index((@active_index - 1 + count) % count)
+  end
+
+  def with_index(new_index : Int32) : Tabs
+    Tabs.new(@titles, new_index, @active_bg, @active_fg, @inactive_fg, @accent_color)
+  end
+
+  def with_colors(active_bg_c : Color, active_fg_c : Color = @active_fg, inactive_fg_c : Color = @inactive_fg) : Tabs
+    Tabs.new(@titles, @active_index, active_bg_c, active_fg_c, inactive_fg_c, @accent_color)
+  end
+
+  def handle_key(key : KeyEvent) : Tabs
+    return self if @titles.empty?
+    if key.is_right?
+      next_tab
+    elsif key.is_left?
+      prev_tab
+    elsif key.text.bytesize == 1
+      byte = key.text.byte_at(0)
+      if byte >= 49_u8 && byte <= 57_u8
+        target = (byte - 49_u8).to_i32
+        return with_index(target) if target < @titles.size
+      end
+      self
+    else
+      self
+    end
+  end
+
+  def render(width : Int32 = 0) : String
+    return "" if @titles.empty?
+
+    active_pill = Style.new_style.bold.foreground(@active_fg).background(@active_bg)
+    active_num  = Style.new_style.bold.foreground(@accent_color).background(@active_bg)
+    inactive_s  = Style.new_style.foreground(@inactive_fg)
+    inactive_num = Style.new_style.dim.foreground(@accent_color)
+    divider = Style.new_style.dim.foreground(Theme.iyi.border_inactive).render(" │ ")
+
+    parts = Array(String).new(@titles.size)
+    idx = 0
+    while idx < @titles.size
+      num_str = "#{idx + 1}:"
+      label = @titles[idx]
+      if idx == @active_index
+        parts << (active_num.render(" ★ #{num_str}") + active_pill.render("#{label} "))
+      else
+        parts << (" " + inactive_num.render(num_str) + inactive_s.render("#{label} "))
+      end
+      idx = idx + 1
+    end
+
+    bar = parts.join(divider)
+    return bar if width <= 0
+    Style.new_style.width(width).align(:left).render(bar)
+  end
+end

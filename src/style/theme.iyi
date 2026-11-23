@@ -1,0 +1,57 @@
+module src/style/theme
+
+import src/style/color::{Color}
+import src/style/style::{Style}
+
+pub struct Theme
+  getter primary : Color
+  getter primary_bold : Color
+  getter secondary : Color
+  getter accent : Color
+  getter muted : Color
+  getter surface : Color
+  getter surface_alt : Color
+  getter text : Color
+  getter dim_text : Color
+  getter border_inactive : Color
+  getter success : Color
+  getter warning : Color
+  getter danger : Color
+
+  def initialize(
+    @primary : Color = Color.hex("#E11D48"),
+    @primary_bold : Color = Color.hex("#DC2626"),
+    @secondary : Color = Color.hex("#FACC15"),
+    @accent : Color = Color.hex("#F59E0B"),
+    @muted : Color = Color.hex("#FDA4AF"),
+    @surface : Color = Color.hex("#2A0A12"),
+    @surface_alt : Color = Color.hex("#450A0A"),
+    @text : Color = Color.hex("#F8FAFC"),
+    @dim_text : Color = Color.ansi256(245),
+    @border_inactive : Color = Color.hex("#450A0A"),
+    @success : Color = Color.hex("#10B981"),
+    @warning : Color = Color.hex("#FACC15"),
+    @danger : Color = Color.hex("#E11D48")
+  )
+  end
+
+  def self.iyi : Theme
+    Theme.new
+  end
+
+  def header_style : Style
+    Style.new_style.bold.foreground(@text).background(@surface).border_foreground(@primary)
+  end
+
+  def active_row_style : Style
+    Style.new_style.bold.foreground(@text).background(@primary)
+  end
+
+  def highlight_style : Style
+    Style.new_style.bold.foreground(@secondary)
+  end
+
+  def muted_style : Style
+    Style.new_style.foreground(@muted)
+  end
+end

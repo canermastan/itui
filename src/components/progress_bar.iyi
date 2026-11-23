@@ -1,0 +1,109 @@
+module src/components/progress_bar
+
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct ProgressBar
+  getter percent : Int32
+  getter bar_width : Int32
+  getter fill_char : String
+  getter empty_char : String
+  getter fill_color : Color
+  getter empty_color : Color
+  getter show_percentage : Bool
+  getter label : String
+
+  def initialize(
+    percent : Int32 = 0,
+    bar_width : Int32 = 24,
+    @fill_char : String = "█",
+    @empty_char : String = "░",
+    @fill_color : Color = Theme.iyi.primary,
+    @empty_color : Color = Theme.iyi.surface_alt,
+    @show_percentage : Bool = true,
+    @label : String = ""
+  )
+    @percent = percent < 0 ? 0 : (percent > 100 ? 100 : percent)
+    @bar_width = bar_width < 4 ? 4 : bar_width
+  end
+
+  def with_percent(new_percent : Int32) : ProgressBar
+    ProgressBar.new(
+      new_percent,
+      @bar_width,
+      @fill_char,
+      @empty_char,
+      @fill_color,
+      @empty_color,
+      @show_percentage,
+      @label
+    )
+  end
+
+  def with_width(new_width : Int32) : ProgressBar
+    ProgressBar.new(
+      @percent,
+      new_width,
+      @fill_char,
+      @empty_char,
+      @fill_color,
+      @empty_color,
+      @show_percentage,
+      @label
+    )
+  end
+
+  def with_glyphs(fill : String, empty : String) : ProgressBar
+    ProgressBar.new(
+      @percent,
+      @bar_width,
+      fill,
+      empty,
+      @fill_color,
+      @empty_color,
+      @show_percentage,
+      @label
+    )
+  end
+
+  def with_colors(fill_c : Color, empty_c : Color = @empty_color) : ProgressBar
+    ProgressBar.new(
+      @percent,
+      @bar_width,
+      @fill_char,
+      @empty_char,
+      fill_c,
+      empty_c,
+      @show_percentage,
+      @label
+    )
+  end
+
+  def with_label(new_label : String) : ProgressBar
+    ProgressBar.new(
+      @percent,
+      @bar_width,
+      @fill_char,
+      @empty_char,
+      @fill_color,
+      @empty_color,
+      @show_percentage,
+      new_label
+    )
+  end
+
+  def render : String
+    filled_count = (@bar_width * @percent) // 100
+    empty_count = @bar_width - filled_count
+
+    filled_part = Style.new_style.foreground(@fill_color).render(@fill_char * filled_count)
+    empty_part  = Style.new_style.foreground(@empty_color).render(@empty_char * empty_count)
+    bar_str = filled_part + empty_part
+
+    prefix = @label.empty? ? "" : Style.new_style.bold.foreground(Theme.iyi.text).render(@label) + " "
+    suffix = @show_percentage ? " " + Style.new_style.bold.foreground(Theme.iyi.secondary).render("#{@percent.to_s.rjust(3)}%") : ""
+
+    prefix + bar_str + suffix
+  end
+end

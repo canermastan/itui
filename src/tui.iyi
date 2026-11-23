@@ -1,0 +1,106 @@
+module src/tui
+
+pub import src/style/ansi
+pub import src/style/color
+pub import src/style/border
+pub import src/style/style
+pub import src/style/theme
+pub import src/core/terminal
+pub import src/core/mouse
+pub import src/core/key
+pub import src/core/window
+pub import src/core/focus
+pub import src/components/help_bar
+pub import src/components/progress_bar
+pub import src/components/spinner
+pub import src/components/table
+pub import src/components/viewport
+pub import src/components/filter_list
+pub import src/components/text_area
+pub import src/components/tabs
+pub import src/components/modal
+pub import src/prompt/select
+pub import src/prompt/multi_select
+pub import src/prompt/input
+pub import src/prompt/confirm
+
+import src/style/ansi::{Ansi}
+import src/style/color::{Color, ColorKind}
+import src/style/border::{Border}
+import src/style/style::{Style, Edges}
+import src/style/theme::{Theme}
+import src/core/terminal::{Terminal}
+import src/core/mouse::{MouseEvent, MouseButton, MouseAction}
+import src/core/key::{KeyEvent, KeyKind, KeyBinding}
+import src/core/window::{WindowSize}
+import src/core/focus::{FocusManager}
+import src/components/help_bar::{HelpBar}
+import src/components/progress_bar::{ProgressBar}
+import src/components/spinner::{Spinner}
+import src/components/table::{Table, TableColumn}
+import src/components/viewport::{Viewport}
+import src/components/filter_list::{FilterList}
+import src/components/text_area::{TextArea}
+import src/components/tabs::{Tabs}
+import src/components/modal::{Modal}
+import src/prompt/select::{SelectPrompt}
+import src/prompt/multi_select::{MultiSelectPrompt}
+import src/prompt/input::{InputPrompt}
+import src/prompt/confirm::{ConfirmPrompt}
+
+pub alias Ansi = Src::Style::Ansi::Ansi
+pub alias Color = Src::Style::Color::Color
+pub alias ColorKind = Src::Style::Color::ColorKind
+pub alias Border = Src::Style::Border::Border
+pub alias Style = Src::Style::Style::Style
+pub alias Edges = Src::Style::Style::Edges
+pub alias Theme = Src::Style::Theme::Theme
+pub alias Terminal = Src::Core::Terminal::Terminal
+pub alias MouseEvent = Src::Core::Mouse::MouseEvent
+pub alias MouseButton = Src::Core::Mouse::MouseButton
+pub alias MouseAction = Src::Core::Mouse::MouseAction
+pub alias KeyEvent = Src::Core::Key::KeyEvent
+pub alias KeyKind = Src::Core::Key::KeyKind
+pub alias KeyBinding = Src::Core::Key::KeyBinding
+pub alias WindowSize = Src::Core::Window::WindowSize
+pub alias FocusManager = Src::Core::Focus::FocusManager
+pub alias HelpBar = Src::Components::HelpBar::HelpBar
+pub alias ProgressBar = Src::Components::ProgressBar::ProgressBar
+pub alias Spinner = Src::Components::Spinner::Spinner
+pub alias Table = Src::Components::Table::Table
+pub alias TableColumn = Src::Components::Table::TableColumn
+pub alias Viewport = Src::Components::Viewport::Viewport
+pub alias FilterList = Src::Components::FilterList::FilterList
+pub alias TextArea = Src::Components::TextArea::TextArea
+pub alias Tabs = Src::Components::Tabs::Tabs
+pub alias Modal = Src::Components::Modal::Modal
+pub alias SelectPrompt = Src::Prompt::Select::SelectPrompt
+pub alias MultiSelectPrompt = Src::Prompt::MultiSelect::MultiSelectPrompt
+pub alias InputPrompt = Src::Prompt::Input::InputPrompt
+pub alias ConfirmPrompt = Src::Prompt::Confirm::ConfirmPrompt
+
+pub struct TUI
+  def self.theme : Theme
+    Theme.iyi
+  end
+
+  def self.select(title : String, options : Array(String)) : String
+    SelectPrompt.ask(title, options)
+  end
+
+  def self.multi_select(title : String, options : Array(String)) : Array(String)
+    MultiSelectPrompt.ask(title, options)
+  end
+
+  def self.input(title : String, placeholder : String = "") : String
+    InputPrompt.ask(title, placeholder)
+  end
+
+  def self.confirm(title : String, default_value : Bool = true) : Bool
+    ConfirmPrompt.ask(title, default_value)
+  end
+
+  def self.window_size(default_cols : Int32 = 100, default_rows : Int32 = 28) : WindowSize
+    WindowSize.detect(default_cols, default_rows)
+  end
+end

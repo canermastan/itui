@@ -1,0 +1,136 @@
+module tests/core_test
+
+import src/core/key::{KeyEvent, KeyKind, KeyBinding}
+import src/core/window::{WindowSize}
+import src/core/focus::{FocusManager}
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+def assert_eq(actual, expected, msg : String) : Nil
+  raise "Assertion failed: #{msg} (expected: #{expected.inspect}, got: #{actual.inspect})" unless actual == expected
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "Assertion failed: #{msg}" unless cond
+end
+
+test "KeyEvent parses all standard CSI and SS3 arrow & navigation sequences" do
+  assert_eq(KeyEvent.parse("\e[A").kind, KeyKind::Up, "CSI A -> Up")
+  assert_eq(KeyEvent.parse("\eOA").kind, KeyKind::Up, "SS3 A -> Up")
+  assert_eq(KeyEvent.parse("\e[B").kind, KeyKind::Down, "CSI B -> Down")
+  assert_eq(KeyEvent.parse("\eOB").kind, KeyKind::Down, "SS3 B -> Down")
+  assert_eq(KeyEvent.parse("\e[C").kind, KeyKind::Right, "CSI C -> Right")
+  assert_eq(KeyEvent.parse("\e[D").kind, KeyKind::Left, "CSI D -> Left")
+  assert_eq(KeyEvent.parse("\e[Z").kind, KeyKind::ShiftTab, "CSI Z -> ShiftTab")
+  assert_eq(KeyEvent.parse("\e[H").kind, KeyKind::Home, "CSI H -> Home")
+  assert_eq(KeyEvent.parse("\e[1~").kind, KeyKind::Home, "CSI 1~ -> Home")
+  assert_eq(KeyEvent.parse("\e[F").kind, KeyKind::End, "CSI F -> End")
+  assert_eq(KeyEvent.parse("\e[4~").kind, KeyKind::End, "CSI 4~ -> End")
+  assert_eq(KeyEvent.parse("\e[3~").kind, KeyKind::Delete, "CSI 3~ -> Delete")
+  assert_eq(KeyEvent.parse("\e[5~").kind, KeyKind::PageUp, "CSI 5~ -> PageUp")
+  assert_eq(KeyEvent.parse("\e[6~").kind, KeyKind::PageDown, "CSI 6~ -> PageDown")
+end
+
+test "KeyEvent parses control bytes (Ctrl+C, Tab, CR, LF, Space, BS, DEL) and malformed escapes safely" do
+  assert_true(KeyEvent.parse("").none?, "empty input -> None")
+  assert_true(KeyEvent.parse("\u0003").is_ctrl_c?, "0x03 -> CtrlC")
+  assert_true(KeyEvent.parse("\u0003").is_quit?, "CtrlC is quit")
+  assert_true(KeyEvent.parse("\t").is_tab?, "0x09 -> Tab")
+  assert_true(KeyEvent.parse("\r").is_enter?, "0x0D -> Enter")
+  assert_true(KeyEvent.parse("\n").is_enter?, "0x0A -> Enter")
+  assert_true(KeyEvent.parse(" ").is_space?, "0x20 -> Space")
+  assert_true(KeyEvent.parse("\b").is_backspace?, "0x08 -> Backspace")
+  assert_true(KeyEvent.parse("\x7f").is_backspace?, "0x7F -> Backspace")
+
+  assert_true(KeyEvent.parse("\e").is_escape?, "lone ESC -> Escape")
+  assert_true(KeyEvent.parse("\e[").is_escape?, "truncated CSI -> Escape")
+  assert_true(KeyEvent.parse("\e[999~").is_escape?, "unknown CSI -> Escape")
+  assert_true(KeyEvent.parse("\ex").is_escape?, "Alt+x unknown -> Escape")
+end
+
+test "KeyEvent extracts UTF-8 characters cleanly and supports Vim hjkl + case-insensitive matches?" do
+  utf = KeyEvent.parse("ğ")
+  assert_eq(utf.kind, KeyKind::Char, "UTF-8 char kind")
+  assert_eq(utf.text, "ğ", "UTF-8 char preserved")
+
+  multi = KeyEvent.parse("öabc")
+  assert_eq(multi.text, "ö", "first UTF-8 char extracted cleanly")
+
+  assert_true(KeyEvent.parse("k").is_up?, "k is up")
+  assert_true(KeyEvent.parse("j").is_down?, "j is down")
+  assert_true(KeyEvent.parse("h").is_left?, "h is left")
+  assert_true(KeyEvent.parse("l").is_right?, "l is right")
+  assert_true(KeyEvent.parse("Q").is_quit?, "uppercase Q is quit")
+  assert_true(KeyEvent.parse("Q").matches?("q"), "matches? is case-insensitive")
+  assert_true(KeyEvent.parse("\e[Z").matches?("SHIFT+TAB"), "matches? handles named keys case-insensitively")
+end
+
+test "KeyBinding matches multiple triggers and ignores events when disabled" do
+  nav = KeyBinding.on_any(["up", "k", "w"], "↑/k", "yukarı")
+  assert_true(nav.matches?(KeyEvent.parse("\e[A")), "matches Up")
+  assert_true(nav.matches?(KeyEvent.parse("k")), "matches k")
+  assert_true(nav.matches?(KeyEvent.parse("W")), "matches W")
+  assert_true(!nav.matches?(KeyEvent.parse("j")), "does not match j")
+
+  off = KeyBinding.new(["q", "esc"], "q", "çıkış", enabled: false)
+  assert_true(!off.matches?(KeyEvent.parse("q")), "disabled binding ignores 'q'")
+  assert_true(!off.matches?(KeyEvent.parse("\e")), "disabled binding ignores Escape")
+end
+
+test "WindowSize clamps tiny/negative dimensions and maintains split_horizontal invariants" do
+  tiny = WindowSize.new(cols: -20, rows: 0)
+  assert_eq(tiny.cols, 20, "cols clamped to minimum 20")
+  assert_eq(tiny.rows, 8, "rows clamped to minimum 8")
+
+  normal = WindowSize.new(cols: 120, rows: 40)
+  l, r = normal.split_horizontal(40, reserved: 10, min_left: 20, min_right: 20)
+  assert_eq(l, 44, "left 40% of 110")
+  assert_eq(r, 66, "right 60% of 110")
+  assert_eq(l + r, 110, "sum equals usable width")
+
+  l2, r2 = normal.split_horizontal(95, reserved: 10, min_left: 20, min_right: 30)
+  assert_eq(r2, 30, "min_right protected")
+  assert_eq(l2, 80, "left adjusted to usable - min_right")
+
+  l3, r3 = tiny.split_horizontal(50, reserved: 12, min_left: 25, min_right: 25)
+  assert_true(l3 >= 25 && r3 >= 25, "both sides respect minimums even on tiny terminal")
+
+  assert_eq(normal.scale_width(50, min_w: 10, max_w: 40), 40, "scale_width respects max_w")
+  assert_eq(normal.scale_height(5, min_h: 6, max_h: 30), 6, "scale_height respects min_h")
+  assert_eq(normal.body_height(reserved_rows: 10, min_rows: 5), 30, "body_height normal")
+  assert_eq(tiny.body_height(reserved_rows: 100, min_rows: 5), 5, "body_height clamped to min_rows")
+end
+
+test "FocusManager handles empty, single, and multi-panel cycling plus direct focus" do
+  empty = FocusManager.new([] of String)
+  assert_eq(empty.current, "", "empty current")
+  assert_true(!empty.focused?("any"), "nothing focused when empty")
+  assert_eq(empty.next_focus.current, "", "next on empty safe")
+  assert_eq(empty.prev_focus.current, "", "prev on empty safe")
+
+  single = FocusManager.new(["only"])
+  assert_eq(single.next_focus.current, "only", "single panel stays on itself")
+  assert_eq(single.prev_focus.current, "only", "single panel prev stays on itself")
+
+  wrapped = FocusManager.new(["a", "b", "c"], -1)
+  assert_eq(wrapped.current, "c", "negative index wraps to last panel")
+
+  fm = FocusManager.new(["services", "logs", "notes"])
+  fm, h1 = fm.handle_key(KeyEvent.parse("\t"))
+  assert_true(h1 && fm.focused?("logs"), "Tab 1 -> logs")
+  fm, h2 = fm.handle_key(KeyEvent.parse("\t"))
+  assert_true(h2 && fm.focused?("notes"), "Tab 2 -> notes")
+  fm, h3 = fm.handle_key(KeyEvent.parse("\t"))
+  assert_true(h3 && fm.focused?("services"), "Tab 3 wraps -> services")
+  fm, h4 = fm.handle_key(KeyEvent.parse("\e[Z"))
+  assert_true(h4 && fm.focused?("notes"), "Shift+Tab wraps -> notes")
+  fm, h5 = fm.handle_key(KeyEvent.parse("x"))
+  assert_true(!h5 && fm.focused?("notes"), "non-tab key returns handled=false")
+
+  fm = fm.focus("logs")
+  assert_true(fm.focused?("logs"), "direct focus works")
+  assert_true(Ansi.strip(fm.format_title("logs", "LOGS")).includes?("[ACTIVE]"), "focused title shows [ACTIVE]")
+  assert_true(!Ansi.strip(fm.format_title("services", "SVC")).includes?("[ACTIVE]"), "unfocused title omits [ACTIVE]")
+end

@@ -1,0 +1,110 @@
+module src/style/border
+
+import src/style/ansi::{Ansi}
+import src/style/color::{Color}
+
+pub struct Border
+  getter top : String
+  getter bottom : String
+  getter left : String
+  getter right : String
+  getter top_left : String
+  getter top_right : String
+  getter bottom_left : String
+  getter bottom_right : String
+  getter empty : Bool
+
+  def initialize(
+    @top : String,
+    @bottom : String,
+    @left : String,
+    @right : String,
+    @top_left : String,
+    @top_right : String,
+    @bottom_left : String,
+    @bottom_right : String,
+    @empty : Bool = false
+  )
+  end
+
+  def self.none : Border
+    Border.new("", "", "", "", "", "", "", "", empty: true)
+  end
+
+  def self.single : Border
+    Border.new(
+      top: "─",
+      bottom: "─",
+      left: "│",
+      right: "│",
+      top_left: "┌",
+      top_right: "┐",
+      bottom_left: "└",
+      bottom_right: "┘"
+    )
+  end
+
+  def self.rounded : Border
+    Border.new(
+      top: "─",
+      bottom: "─",
+      left: "│",
+      right: "│",
+      top_left: "╭",
+      top_right: "╮",
+      bottom_left: "╰",
+      bottom_right: "╯"
+    )
+  end
+
+  def self.double : Border
+    Border.new(
+      top: "═",
+      bottom: "═",
+      left: "║",
+      right: "║",
+      top_left: "╔",
+      top_right: "╗",
+      bottom_left: "╚",
+      bottom_right: "╝"
+    )
+  end
+
+  def self.thick : Border
+    Border.new(
+      top: "━",
+      bottom: "━",
+      left: "┃",
+      right: "┃",
+      top_left: "┏",
+      top_right: "┓",
+      bottom_left: "┗",
+      bottom_right: "┛"
+    )
+  end
+
+  def none? : Bool
+    @empty
+  end
+
+  def render_box(lines : Array(String), content_width : Int32, fg : Color, bg : Color) : Array(String)
+    return lines if @empty
+
+    codes = [] of String
+    codes << fg.fg_sgr unless fg.none?
+    codes << bg.bg_sgr unless bg.none?
+
+    top_bar = Ansi.wrap(@top_left + (@top * content_width) + @top_right, codes)
+    bottom_bar = Ansi.wrap(@bottom_left + (@bottom * content_width) + @bottom_right, codes)
+    left_wall = Ansi.wrap(@left, codes)
+    right_wall = Ansi.wrap(@right, codes)
+
+    result = Array(String).new(lines.size + 2)
+    result << top_bar
+    lines.each do |line|
+      result << (left_wall + line + right_wall)
+    end
+    result << bottom_bar
+    result
+  end
+end

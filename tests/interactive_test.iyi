@@ -1,0 +1,174 @@
+module tests/interactive_test
+
+import src/style/ansi::{Ansi}
+import src/style/theme::{Theme}
+import src/core/key::{KeyEvent}
+import src/components/filter_list::{FilterList}
+import src/components/text_area::{TextArea}
+import src/components/tabs::{Tabs}
+import src/components/modal::{Modal}
+import src/prompt/select::{SelectPrompt}
+import src/prompt/multi_select::{MultiSelectPrompt}
+import src/prompt/input::{InputPrompt}
+import src/prompt/confirm::{ConfirmPrompt}
+
+def assert_eq(actual, expected, msg : String) : Nil
+  raise "Assertion failed: #{msg} (expected: #{expected.inspect}, got: #{actual.inspect})" unless actual == expected
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "Assertion failed: #{msg}" unless cond
+end
+
+test "FilterList allows typing 'j' and 'k' into query while Up/Down arrows move cursor" do
+  items = ["kafka", "jenkins", "minio", "kibana"]
+  fl = FilterList.new(items)
+
+  fl = fl.handle_key(KeyEvent.parse("k"))
+  assert_eq(fl.query, "k", "'k' must be typed into search query")
+  assert_eq(fl.filtered_items.size, 3, "kafka, jenkins, kibana match 'k'")
+  assert_eq(fl.selected_item, "kafka", "initial match is kafka")
+
+  fl = fl.handle_key(KeyEvent.parse("\e[B"))
+  assert_eq(fl.selected_item, "jenkins", "Down arrow selects jenkins")
+  assert_eq(fl.selected_original_index, 1, "original index of jenkins is 1")
+
+  fl = fl.handle_key(KeyEvent.parse("\e[A"))
+  assert_eq(fl.selected_item, "kafka", "Up arrow returns to kafka")
+
+  fl = fl.handle_key(KeyEvent.parse("j"))
+  assert_eq(fl.query, "kj", "'j' appended to query")
+  assert_true(fl.filtered_items.empty?, "no item contains 'kj'")
+  assert_eq(fl.selected_original_index, -1, "no match returns -1 original index")
+
+  fl = fl.handle_key(KeyEvent.parse("\x7f"))
+  assert_eq(fl.query, "k", "Backspace removes last char")
+  assert_eq(fl.filtered_items.size, 3, "matches restored after Backspace")
+end
+
+test "FilterList highlights matched substring in gold (#FACC15) case-insensitively" do
+  fl = FilterList.new(["Chatwoot", "MinIO"], query: "woot")
+  rendered = fl.render
+  assert_true(rendered.includes?("38;2;250;204;21"), "gold highlight sequence present")
+  assert_true(Ansi.strip(rendered).includes?("▸ Chatwoot"), "plain text preserves original casing")
+end
+
+test "TextArea edits mid-line, handles UTF-8 chars, clamps cursor_col across shorter lines" do
+  ta = TextArea.from_text("Merhaba Dünya\nKısa\nÜçüncü satır")
+  assert_eq(ta.line_count, 3, "3 lines initialized")
+  assert_eq(ta.cursor_row, 2, "cursor starts at last row")
+  assert_eq(ta.cursor_col, 12, "cursor starts at end of 'Üçüncü satır' (12 chars)")
+
+  ta = ta.move_up
+  assert_eq(ta.cursor_row, 1, "row 1")
+  assert_eq(ta.cursor_col, 4, "col clamped to shorter line length")
+
+  ta = ta.move_left.move_left.insert_text("!")
+  assert_eq(ta.lines[1], "Kı!sa", "mid-line UTF-8 insertion works")
+  assert_eq(ta.cursor_col, 3, "cursor advances past inserted char")
+
+  ta = ta.insert_newline
+  assert_eq(ta.line_count, 4, "Enter increases line count to 4")
+  assert_eq(ta.lines[1], "Kı!", "left half kept on previous line")
+  assert_eq(ta.lines[2], "sa", "right half moved to new line")
+  assert_eq(ta.cursor_row, 2, "cursor on new line")
+  assert_eq(ta.cursor_col, 0, "cursor at col 0")
+end
+
+test "TextArea Left/Right wraps across line boundaries and Backspace at (0,0) is safe" do
+  ta = TextArea.new(["ab", "cd"], cursor_row: 0, cursor_col: 0)
+  assert_eq(ta.backspace.value, "ab\ncd", "Backspace at (0,0) is no-op")
+  assert_eq(ta.move_left.cursor_row, 0, "Left at (0,0) stays at (0,0)")
+
+  ta = ta.move_right.move_right.move_right
+  assert_eq(ta.cursor_row, 1, "Right past end of line wraps to next line")
+  assert_eq(ta.cursor_col, 0, "wrapped cursor lands at col 0")
+
+  ta = ta.move_left
+  assert_eq(ta.cursor_row, 0, "Left at col 0 wraps to previous line")
+  assert_eq(ta.cursor_col, 2, "wrapped cursor lands at end of previous line")
+
+  rendered = Ansi.strip(ta.render(focused: true))
+  assert_true(rendered.includes?(" 1 │ ab"), "line 1 number rendered")
+  assert_true(rendered.includes?(" 2 │ cd"), "line 2 number rendered")
+end
+
+test "Tabs ignores out-of-range digit keys and wraps on Left/Right" do
+  tabs = Tabs.new(["One", "Two"], active_index: 0)
+  assert_eq(tabs.handle_key(KeyEvent.parse("9")).active_index, 0, "digit > size is ignored")
+  assert_eq(tabs.handle_key(KeyEvent.parse("2")).active_index, 1, "digit '2' switches to index 1")
+  assert_eq(tabs.handle_key(KeyEvent.parse("\e[D")).active_index, 1, "Left from index 0 wraps to last")
+  assert_eq(tabs.handle_key(KeyEvent.parse("\e[C")).active_index, 1, "Right from index 0 goes to 1")
+end
+
+test "Modal wraps long messages, toggles buttons, closes on Esc/Enter, and centers over background" do
+  long_msg = "Bu çok uzun bir onay mesajıdır ve modal kutusunun genişliğini aşmamak için otomatik olarak satırlara bölünmelidir."
+  m = Modal.new("Uyarı", long_msg, "Devam", "Vazgeç", confirm_selected: true, visible: true, width: 32)
+  rendered = m.render
+  lines = rendered.split('\n')
+
+  w0 = Ansi.visible_width(lines[0])
+  lines.each_with_index do |line, i|
+    assert_eq(Ansi.visible_width(line), w0, "modal line #{i} width must match border width")
+  end
+
+  hidden = m.hide
+  assert_eq(hidden.render, "", "hidden modal renders empty")
+  assert_eq(hidden.render_over("bg1\nbg2"), "bg1\nbg2", "hidden modal leaves background untouched")
+
+  cancelled = m.handle_key(KeyEvent.parse("\e"))
+  assert_true(!cancelled.visible && !cancelled.confirm_selected, "Escape cancels and hides modal")
+
+  toggled = m.handle_key(KeyEvent.parse("\e[C"))
+  assert_true(toggled.visible && !toggled.confirm_selected, "Right arrow selects cancel button")
+  closed = toggled.handle_key(KeyEvent.parse("\n"))
+  assert_true(!closed.visible && !closed.confirm_selected, "Enter closes modal preserving button state")
+end
+
+test "SelectPrompt wraps around top/bottom and completes on Enter" do
+  s = SelectPrompt.new("Seç:", ["A", "B", "C"])
+  s = s.handle_key(KeyEvent.parse("\e[A"))
+  assert_eq(s.selected, "C", "Up wraps to last option")
+  s = s.handle_key(KeyEvent.parse("\e[B"))
+  assert_eq(s.selected, "A", "Down wraps to first option")
+  s = s.handle_key(KeyEvent.parse("\n"))
+  assert_true(s.done && s.selected == "A", "Enter finishes with selected option")
+end
+
+test "MultiSelectPrompt toggles individual items and 'a' toggles select-all / deselect-all" do
+  ms = MultiSelectPrompt.new("Paketler:", ["Redis", "MinIO", "Postgres"])
+  ms = ms.handle_key(KeyEvent.parse("a"))
+  assert_eq(ms.selected_items.size, 3, "'a' selects all 3 items")
+  ms = ms.handle_key(KeyEvent.parse("a"))
+  assert_eq(ms.selected_items.size, 0, "second 'a' deselects all items")
+
+  ms = ms.handle_key(KeyEvent.parse(" ")).handle_key(KeyEvent.parse("j")).handle_key(KeyEvent.parse(" "))
+  assert_eq(ms.selected_items, ["Redis", "MinIO"], "Space toggles cursor items")
+  ms = ms.handle_key(KeyEvent.parse(" "))
+  assert_eq(ms.selected_items, ["Redis"], "second Space untoggles current item")
+end
+
+test "InputPrompt handles UTF-8 typing, UTF-8 backspace, and placeholder fallback" do
+  inp = InputPrompt.new("İsim:", "", "varsayilan")
+  assert_eq(inp.result_value, "varsayilan", "empty value uses placeholder")
+
+  inp = inp.handle_key(KeyEvent.parse("ş")).handle_key(KeyEvent.parse("ö")).handle_key(KeyEvent.parse("ü"))
+  assert_eq(inp.result_value, "şöü", "UTF-8 input accumulated")
+  inp = inp.handle_key(KeyEvent.parse("\x7f"))
+  assert_eq(inp.result_value, "şö", "UTF-8 backspace deletes 1 whole character, not 1 byte")
+  inp = inp.handle_key(KeyEvent.parse("\x7f")).handle_key(KeyEvent.parse("\x7f"))
+  assert_eq(inp.result_value, "varsayilan", "backspacing to empty restores placeholder fallback")
+end
+
+test "ConfirmPrompt handles Turkish/English shortcuts (e/y, h/n) and Left/Right toggle" do
+  c = ConfirmPrompt.new("Emin misin?", value: true)
+  assert_true(c.handle_key(KeyEvent.parse("h")).value == false, "'h' selects false")
+  assert_true(c.handle_key(KeyEvent.parse("n")).value == false, "'n' selects false")
+  assert_true(c.handle_key(KeyEvent.parse("e")).value == true, "'e' selects true")
+  assert_true(c.handle_key(KeyEvent.parse("y")).value == true, "'y' selects true")
+
+  toggled = c.handle_key(KeyEvent.parse("\e[C"))
+  assert_true(!toggled.done && toggled.value == false, "Right arrow toggles value to false without finishing")
+  toggled_back = toggled.handle_key(KeyEvent.parse("\e[D"))
+  assert_true(!toggled_back.done && toggled_back.value == true, "Left arrow toggles value back to true")
+end

@@ -1,0 +1,64 @@
+module tests/mouse_test
+
+import src/tui::*
+
+def assert_eq(actual, expected, msg : String) : Nil
+  raise "Assertion failed: #{msg} (expected: #{expected.inspect}, got: #{actual.inspect})" unless actual == expected
+end
+
+def assert_true(cond : Bool, msg : String) : Nil
+  raise "Assertion failed: #{msg}" unless cond
+end
+
+test "MouseEvent.parse_sgr decodes left/right click, release, wheel up/down, and hit-testing" do
+  ev_click = KeyEvent.parse("\e[<0;15;8M")
+  assert_true(ev_click.is_mouse? && ev_click.is_click?, "SGR 0;15;8M is left click")
+  assert_eq(ev_click.mouse.x, 15, "click x coordinate")
+  assert_eq(ev_click.mouse.y, 8, "click y coordinate")
+  assert_true(ev_click.mouse.in_rect?(10, 5, 10, 5), "(15,8) is inside [10..20, 5..10)")
+  assert_true(!ev_click.mouse.in_rect?(16, 5, 10, 5), "(15,8) is outside [16..26, 5..10)")
+
+  ev_release = KeyEvent.parse("\e[<0;15;8m")
+  assert_true(ev_release.is_mouse? && ev_release.mouse.is_release? && !ev_release.is_click?, "lowercase m is release")
+
+  ev_right = KeyEvent.parse("\e[<2;4;2M")
+  assert_true(ev_right.is_right_click?, "SGR button 2 is right click")
+
+  ev_wup = KeyEvent.parse("\e[<64;20;10M")
+  assert_true(ev_wup.is_wheel_up?, "SGR button 64 is wheel up")
+
+  ev_wdown = KeyEvent.parse("\e[<65;20;10M")
+  assert_true(ev_wdown.is_wheel_down?, "SGR button 65 is wheel down")
+
+  bad_ev, consumed = MouseEvent.parse_sgr("\e[<0;15")
+  assert_true(bad_ev.none? && consumed == 0, "truncated SGR sequence returns none safely")
+end
+
+test "Viewport and Table respond to mouse wheel events natively" do
+  vp = Viewport.new(["L1", "L2", "L3", "L4", "L5"], offset: 0, width: 24, height: 2)
+  vp = vp.handle_key(KeyEvent.parse("\e[<65;5;5M"))
+  assert_eq(vp.offset, 1, "wheel down scrolls viewport down")
+  vp = vp.handle_key(KeyEvent.parse("\e[<64;5;5M"))
+  assert_eq(vp.offset, 0, "wheel up scrolls viewport up")
+
+  tbl = Table.new([TableColumn.new("A", 6)], [["R1"], ["R2"], ["R3"]])
+  tbl = tbl.handle_key(KeyEvent.parse("\e[<65;5;5M"))
+  assert_eq(tbl.cursor, 1, "wheel down moves table cursor down")
+  tbl = tbl.handle_key(KeyEvent.parse("\e[<64;5;5M"))
+  assert_eq(tbl.cursor, 0, "wheel up moves table cursor up")
+end
+
+test "KeyEvent.parse_all preserves pasted UTF-8 text and mixed arrow/mouse sequences without dropping bytes" do
+  pasted = KeyEvent.parse_all("Merhaba şğü!")
+  assert_eq(pasted.size, 12, "all 12 UTF-8 characters preserved in paste")
+  rebuilt = pasted.map { |k| k.text }.join
+  assert_eq(rebuilt, "Merhaba şğü!", "rebuilt pasted string matches original")
+
+  mixed = KeyEvent.parse_all("a\e[A\e[<0;10;4Mb\e[Z")
+  assert_eq(mixed.size, 5, "mixed char + arrow + SGR mouse + char + ShiftTab = 5 events")
+  assert_eq(mixed[0].text, "a", "event 0 is 'a'")
+  assert_true(mixed[1].is_up?, "event 1 is Up")
+  assert_true(mixed[2].is_click? && mixed[2].mouse.x == 10 && mixed[2].mouse.y == 4, "event 2 is mouse click (10,4)")
+  assert_eq(mixed[3].text, "b", "event 3 is 'b'")
+  assert_true(mixed[4].is_shift_tab?, "event 4 is ShiftTab")
+end

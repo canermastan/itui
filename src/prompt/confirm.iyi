@@ -1,0 +1,88 @@
+module src/prompt/confirm
+
+import src/core/key::{KeyEvent}
+import src/core/terminal::{Terminal}
+import src/style/color::{Color}
+import src/style/style::{Style}
+import src/style/theme::{Theme}
+
+pub struct ConfirmPrompt
+  getter title : String
+  getter value : Bool
+  getter done : Bool
+  getter yes_color : Color
+  getter no_color : Color
+
+  def initialize(
+    @title : String,
+    @value : Bool = true,
+    @done : Bool = false,
+    @yes_color : Color = Theme.iyi.secondary,
+    @no_color : Color = Theme.iyi.primary
+  )
+  end
+
+  def with_colors(yes_c : Color, no_c : Color = @no_color) : ConfirmPrompt
+    ConfirmPrompt.new(@title, @value, @done, yes_c, no_c)
+  end
+
+  # Checks `'y'`/`'e'` and `'n'`/`'h'` before `is_left?` because `is_left?` also matches `'h'` (Vim left).
+  def handle_key(key : KeyEvent) : ConfirmPrompt
+    if key.matches?("y") || key.matches?("e")
+      ConfirmPrompt.new(@title, true, true, @yes_color, @no_color)
+    elsif key.matches?("n") || key.matches?("h")
+      ConfirmPrompt.new(@title, false, true, @yes_color, @no_color)
+    elsif key.is_left? || key.is_right? || key.is_tab? || key.is_space?
+      ConfirmPrompt.new(@title, !@value, false, @yes_color, @no_color)
+    elsif key.is_enter? || key.is_quit?
+      ConfirmPrompt.new(@title, @value, true, @yes_color, @no_color)
+    else
+      self
+    end
+  end
+
+  def render : String
+    q_mark = Style.new_style.bold.foreground(Theme.iyi.primary).render("♥")
+    title_str = Style.new_style.bold.foreground(Theme.iyi.text).render(@title)
+
+    active_yes = Style.new_style.bold.foreground(Theme.iyi.surface).background(@yes_color).render(" Evet ")
+    normal_yes = Style.new_style.dim.foreground(Theme.iyi.muted).render(" Evet ")
+
+    active_no  = Style.new_style.bold.foreground(Theme.iyi.text).background(@no_color).render(" Hayır ")
+    normal_no  = Style.new_style.dim.foreground(Theme.iyi.muted).render(" Hayır ")
+
+    yes_btn = @value ? active_yes : normal_yes
+    no_btn  = !@value ? active_no : normal_no
+
+    "#{q_mark} #{title_str}  #{yes_btn} / #{no_btn}"
+  end
+
+  def self.ask(title : String, default_value : Bool = true) : Bool
+    state = ConfirmPrompt.new(title, default_value, false)
+    tty = Terminal.tty?
+
+    answer = Terminal.with_raw_mode(hide_cursor_on_enter: true) do
+      while !state.done
+        if tty
+          STDOUT.write("\e[2K\r" + state.render)
+        end
+        key = KeyEvent.read
+        break if key.none?
+        state = state.handle_key(key)
+      end
+      if tty
+        STDOUT.write("\e[2K\r")
+      end
+      state.value
+    end
+
+    icon_color = answer ? Theme.iyi.secondary : Theme.iyi.primary
+    icon_glyph = answer ? "♥" : "✗"
+    icon_str   = Style.new_style.bold.foreground(icon_color).render(icon_glyph)
+    title_str  = Style.new_style.bold.foreground(Theme.iyi.text).render(title)
+    ans_label  = answer ? "Evet" : "Hayır"
+    ans_str    = Style.new_style.bold.foreground(icon_color).render(ans_label)
+    puts "#{icon_str} #{title_str} #{ans_str}"
+    answer
+  end
+end

@@ -1,0 +1,318 @@
+module src/core/key
+
+import src/core/terminal::{Terminal}
+import src/core/mouse::{MouseEvent}
+
+pub enum KeyKind : Int32
+  None      =  0
+  Char      =  1
+  Up        =  2
+  Down      =  3
+  Left      =  4
+  Right     =  5
+  Enter     =  6
+  Space     =  7
+  Tab       =  8
+  ShiftTab  =  9
+  Backspace = 10
+  Delete    = 11
+  Escape    = 12
+  Home      = 13
+  End       = 14
+  PageUp    = 15
+  PageDown  = 16
+  CtrlC     = 17
+  Mouse     = 18
+end
+
+pub struct KeyEvent
+  getter kind : KeyKind
+  getter text : String
+  getter mouse : MouseEvent
+
+  def initialize(@kind : KeyKind, @text : String = "", @mouse : MouseEvent = MouseEvent.none)
+  end
+
+  def self.none : KeyEvent
+    KeyEvent.new(KeyKind::None, "")
+  end
+
+  def self.from_mouse(event : MouseEvent) : KeyEvent
+    KeyEvent.new(KeyKind::Mouse, "mouse", event)
+  end
+
+  @@pending = [] of KeyEvent
+
+  # Reads the next event from standard input, buffering multi-key bursts/pastes
+  # so rapid typing or pasted text never drops characters.
+  def self.read : KeyEvent
+    unless @@pending.empty?
+      return @@pending.shift
+    end
+    chunk = Terminal.read_raw_chunk(64)
+    events = parse_all(chunk)
+    return none if events.empty?
+    first = events.shift
+    events.each { |ev| @@pending << ev }
+    first
+  end
+
+  def self.parse(raw : String) : KeyEvent
+    ev, _ = parse_one(raw, 0)
+    ev
+  end
+
+  # Parses all key and SGR mouse events contained in a single raw chunk without dropping trailing bytes.
+  def self.parse_all(raw : String) : Array(KeyEvent)
+    result = [] of KeyEvent
+    offset = 0
+    len = raw.bytesize
+    while offset < len
+      ev, consumed = parse_one(raw, offset)
+      break if consumed <= 0
+      result << ev unless ev.none?
+      offset = offset + consumed
+    end
+    result
+  end
+
+  private def self.parse_one(raw : String, offset : Int32) : {KeyEvent, Int32}
+    len = raw.bytesize
+    return {none, 0} if offset >= len
+
+    b0 = raw.byte_at(offset)
+
+    if b0 == 27_u8
+      return {KeyEvent.new(KeyKind::Escape, "esc"), 1} if offset + 1 >= len
+      b1 = raw.byte_at(offset + 1)
+
+      if b1 == 91_u8 && offset + 2 < len && raw.byte_at(offset + 2) == 60_u8
+        m_ev, m_consumed = MouseEvent.parse_sgr(raw, offset)
+        return {from_mouse(m_ev), m_consumed} if m_consumed > 0
+      end
+
+      if b1 == 91_u8 || b1 == 79_u8
+        return {KeyEvent.new(KeyKind::Escape, "esc"), len - offset} if offset + 2 >= len
+        b2 = raw.byte_at(offset + 2)
+        case b2
+        when 65_u8 then return {KeyEvent.new(KeyKind::Up, "up"), 3}
+        when 66_u8 then return {KeyEvent.new(KeyKind::Down, "down"), 3}
+        when 67_u8 then return {KeyEvent.new(KeyKind::Right, "right"), 3}
+        when 68_u8 then return {KeyEvent.new(KeyKind::Left, "left"), 3}
+        when 72_u8 then return {KeyEvent.new(KeyKind::Home, "home"), 3}
+        when 70_u8 then return {KeyEvent.new(KeyKind::End, "end"), 3}
+        when 90_u8 then return {KeyEvent.new(KeyKind::ShiftTab, "shift+tab"), 3}
+        when 51_u8
+          step = (offset + 3 < len && raw.byte_at(offset + 3) == 126_u8) ? 4 : 3
+          return {KeyEvent.new(KeyKind::Delete, "delete"), step}
+        when 53_u8
+          step = (offset + 3 < len && raw.byte_at(offset + 3) == 126_u8) ? 4 : 3
+          return {KeyEvent.new(KeyKind::PageUp, "pgup"), step}
+        when 54_u8
+          step = (offset + 3 < len && raw.byte_at(offset + 3) == 126_u8) ? 4 : 3
+          return {KeyEvent.new(KeyKind::PageDown, "pgdn"), step}
+        when 49_u8, 55_u8
+          step = (offset + 3 < len && raw.byte_at(offset + 3) == 126_u8) ? 4 : 3
+          return {KeyEvent.new(KeyKind::Home, "home"), step}
+        when 52_u8, 56_u8
+          step = (offset + 3 < len && raw.byte_at(offset + 3) == 126_u8) ? 4 : 3
+          return {KeyEvent.new(KeyKind::End, "end"), step}
+        else
+          # Skip unknown CSI sequence up to its final terminator byte (0x40..0x7E)
+          pos = offset + 2
+          while pos < len
+            tb = raw.byte_at(pos)
+            pos = pos + 1
+            break if tb >= 64_u8 && tb <= 126_u8
+          end
+          return {KeyEvent.new(KeyKind::Escape, "esc"), pos - offset}
+        end
+      end
+      return {KeyEvent.new(KeyKind::Escape, "esc"), 2}
+    end
+
+    case b0
+    when 3_u8
+      {KeyEvent.new(KeyKind::CtrlC, "ctrl+c"), 1}
+    when 9_u8
+      {KeyEvent.new(KeyKind::Tab, "tab"), 1}
+    when 10_u8, 13_u8
+      {KeyEvent.new(KeyKind::Enter, "enter"), 1}
+    when 32_u8
+      {KeyEvent.new(KeyKind::Space, " "), 1}
+    when 8_u8, 127_u8
+      {KeyEvent.new(KeyKind::Backspace, "backspace"), 1}
+    else
+      char_bytes = utf8_char_width(b0)
+      avail = len - offset
+      take = char_bytes <= avail ? char_bytes : avail
+      slice = raw[offset, take]
+      {KeyEvent.new(KeyKind::Char, slice), take}
+    end
+  end
+
+  private def self.utf8_char_width(lead : UInt8) : Int32
+    if lead < 0x80_u8
+      1
+    elsif lead < 0xE0_u8
+      2
+    elsif lead < 0xF0_u8
+      3
+    else
+      4
+    end
+  end
+
+  def none? : Bool
+    @kind == KeyKind::None
+  end
+
+  def is_mouse? : Bool
+    @kind == KeyKind::Mouse
+  end
+
+  def is_click? : Bool
+    @kind == KeyKind::Mouse && @mouse.is_click?
+  end
+
+  def is_right_click? : Bool
+    @kind == KeyKind::Mouse && @mouse.is_right_click?
+  end
+
+  def is_wheel_up? : Bool
+    @kind == KeyKind::Mouse && @mouse.is_wheel_up?
+  end
+
+  def is_wheel_down? : Bool
+    @kind == KeyKind::Mouse && @mouse.is_wheel_down?
+  end
+
+  def is_char? : Bool
+    @kind == KeyKind::Char || @kind == KeyKind::Space
+  end
+
+  def is_up? : Bool
+    @kind == KeyKind::Up || (@kind == KeyKind::Char && @text == "k")
+  end
+
+  def is_down? : Bool
+    @kind == KeyKind::Down || (@kind == KeyKind::Char && @text == "j")
+  end
+
+  def is_left? : Bool
+    @kind == KeyKind::Left || (@kind == KeyKind::Char && @text == "h")
+  end
+
+  def is_right? : Bool
+    @kind == KeyKind::Right || (@kind == KeyKind::Char && @text == "l")
+  end
+
+  def is_enter? : Bool
+    @kind == KeyKind::Enter
+  end
+
+  def is_space? : Bool
+    @kind == KeyKind::Space
+  end
+
+  def is_tab? : Bool
+    @kind == KeyKind::Tab
+  end
+
+  def is_shift_tab? : Bool
+    @kind == KeyKind::ShiftTab
+  end
+
+  def is_backspace? : Bool
+    @kind == KeyKind::Backspace
+  end
+
+  def is_delete? : Bool
+    @kind == KeyKind::Delete
+  end
+
+  def is_escape? : Bool
+    @kind == KeyKind::Escape
+  end
+
+  def is_ctrl_c? : Bool
+    @kind == KeyKind::CtrlC
+  end
+
+  def is_page_up? : Bool
+    @kind == KeyKind::PageUp
+  end
+
+  def is_page_down? : Bool
+    @kind == KeyKind::PageDown
+  end
+
+  def is_home? : Bool
+    @kind == KeyKind::Home
+  end
+
+  def is_end? : Bool
+    @kind == KeyKind::End
+  end
+
+  def is_quit? : Bool
+    @kind == KeyKind::CtrlC || @kind == KeyKind::Escape || (@kind == KeyKind::Char && (@text == "q" || @text == "Q"))
+  end
+
+  def matches?(pattern : String) : Bool
+    norm = pattern.downcase
+    return true if @text.downcase == norm
+    case norm
+    when "up"        then @kind == KeyKind::Up
+    when "down"      then @kind == KeyKind::Down
+    when "left"      then @kind == KeyKind::Left
+    when "right"     then @kind == KeyKind::Right
+    when "enter"     then @kind == KeyKind::Enter
+    when "space"     then @kind == KeyKind::Space
+    when "tab"       then @kind == KeyKind::Tab
+    when "shift+tab" then @kind == KeyKind::ShiftTab
+    when "backspace" then @kind == KeyKind::Backspace
+    when "delete"    then @kind == KeyKind::Delete
+    when "esc"       then @kind == KeyKind::Escape
+    when "ctrl+c"    then @kind == KeyKind::CtrlC
+    when "pgup"      then @kind == KeyKind::PageUp
+    when "pgdn"      then @kind == KeyKind::PageDown
+    when "home"      then @kind == KeyKind::Home
+    when "end"       then @kind == KeyKind::End
+    when "mouse"     then @kind == KeyKind::Mouse
+    else                  false
+    end
+  end
+
+  def matches_any?(patterns : Array(String)) : Bool
+    patterns.any? { |p| matches?(p) }
+  end
+end
+
+pub struct KeyBinding
+  getter keys : Array(String)
+  getter key_label : String
+  getter description : String
+  getter enabled : Bool
+
+  def initialize(
+    @keys : Array(String),
+    @key_label : String,
+    @description : String,
+    @enabled : Bool = true
+  )
+  end
+
+  def self.on(key : String, label : String, description : String) : KeyBinding
+    KeyBinding.new([key], label, description)
+  end
+
+  def self.on_any(keys : Array(String), label : String, description : String) : KeyBinding
+    KeyBinding.new(keys, label, description)
+  end
+
+  def matches?(event : KeyEvent) : Bool
+    return false unless @enabled
+    event.matches_any?(@keys)
+  end
+end
